@@ -60,24 +60,6 @@ async def safe_fetch_fees(exchange, retries=5, delay=4):
                     async with session.get(url=url, headers=headers) as response:
                         fees = await response.json()
                         return fees
-            # if exchange.id == 'binance':
-            #     api_key = "RlSkkX95SM6wEpc90ewL1Xe7e6lcmiuzJeMDRuOD2YYrmctuRBHGjuYAGLxoiYXA"
-            #     api_secret = "7aFzFhQUBInyWCXritxcidggFHjZpFW3Zj6d4F59fiAlwTZOSJ4PHrkVRGnBugpg"
-
-            #     timestamp = int(time.time() * 1000)
-            #     query_string = f"timestamp={timestamp}"
-
-            #     signature = hmac.new(api_secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-            #     url = f"https://fapi.binance.com/fapi/v1/commissionRate?{query_string}&signature={signature}"
-
-            #     headers = {
-            #         "X-MBX-APIKEY": api_key
-            #     }
-
-            #     async with aiohttp.ClientSession() as session:
-            #         async with session.get(url=url, headers=headers) as response:
-            #             fees = await response.json()
-            #             return fees
             if exchange.id == 'binance':
                 return await exchange.fetch_trading_fees(params={'subType': 'linear'})
             if exchange.id == 'bybit':
@@ -324,7 +306,7 @@ async def get_time_until_funding(funding_timestamp: int, exchange_name) -> str:
 
 
 
-async def фильтрованный_словарь(data, symbol, exchange, maker=None, taker=None, funding=None, get_funding=None):
+async def фильтрованный_словарь(data, symbol, exchange, maker=None, taker=None, funding=None, get_funding=None, index=None):
     if symbol not in data:
         data[symbol] = {}
     if exchange not in data[symbol]:
@@ -338,9 +320,12 @@ async def фильтрованный_словарь(data, symbol, exchange, make
     if funding is not None and get_funding is not None:
         data[symbol][exchange]["funding"] = funding * 100  # % 
         data[symbol][exchange]["get_funding"] = await get_time_until_funding(get_funding, exchange)
+    
+    if index is not None:
+        data[symbol][exchange]['index'] = index
 
 
-async def bingxx(data):
+async def bingxx(data):#есть
     bingx = ccxt.bingx({
         "options": {"defaultType": "future"},
         "enableRateLimit": True
@@ -363,7 +348,8 @@ async def bingxx(data):
                 symbol = k.get('symbol').replace('-', '')
                 фандинг = float(k.get('lastFundingRate'))
                 начисление = k.get('nextFundingTime')
-                await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление)
+                индекс = float(k.get('indexPrice'))
+                await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление, index=индекс)
                 
             
             
@@ -373,7 +359,7 @@ async def bingxx(data):
     finally:
         await bingx.close()
 
-async def binancee(data):
+async def binancee(data):#есть
     binance = ccxt.binance(
         {
             "apiKey": "RlSkkX95SM6wEpc90ewL1Xe7e6lcmiuzJeMDRuOD2YYrmctuRBHGjuYAGLxoiYXA",
@@ -403,14 +389,15 @@ async def binancee(data):
                     symbol = k.get('symbol')
                     фандинг = float(k.get('lastFundingRate'))
                     начисление = k.get('nextFundingTime')
-                    await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление)
+                    индекс = float(k.get('indexPrice'))
+                    await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление, index=индекс)
                     
     except Exception as e:
         print(f"Ошибка: {e}")
     finally:
         await binance.close()
     
-async def bybitt(data):
+async def bybitt(data):#есть
     bybit = ccxt.bybit(
         {
             "apiKey": "mKSVOO3FmriPpHZFat",
@@ -440,7 +427,8 @@ async def bybitt(data):
                     symbol = k.get('symbol')
                     фандинг = float(k.get('fundingRate'))
                     начисление = float(k.get('nextFundingTime'))
-                    await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление)
+                    индекс = float(k.get('indexPrice'))
+                    await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление, index=индекс)
                     
     except Exception as e:
         print(f"Ошибка: {e}")
@@ -476,7 +464,7 @@ async def bitgett(data):
     finally:
         await bitget.close()
 
-async def gatee(data):
+async def gatee(data):#есть
     gate = ccxt.gateio({
         'apiKey': "0d462033d632b658b067a374303d0fd5",
         'secret': "dad81dc4be1cb652004ceecca375006d9108f36d5164f206ca05a2ea1ae0443f",
@@ -495,7 +483,8 @@ async def gatee(data):
                     начисление = float(k.get('funding_next_apply'))
                     maker = float(k.get('maker_fee_rate'))
                     taker = float(k.get('taker_fee_rate'))
-                    await фильтрованный_словарь(data, symbol, exchange, maker=maker, taker=taker, funding=фандинг, get_funding=начисление)
+                    индекс = float(k.get('index_price'))
+                    await фильтрованный_словарь(data, symbol, exchange, maker=maker, taker=taker, funding=фандинг, get_funding=начисление, index=индекс)
                     
                     
                     
@@ -641,25 +630,25 @@ async def mexcc(data):
 
 #lbank xt bitmart 
 
-asyncio.run()
-
-# async def api():
-#     data = {}
-#     await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data))
-#     #await asyncio.gather(mexcc(data))
 
 
-#     # with open('filtr.txt', 'w', encoding='utf-8') as f:
-#     #     json.dump(data, f, ensure_ascii=False, indent=4)
-#     # print(len(data.keys()))
+async def api():
+    data = {}
+    await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data), bingxx(data), htxx(data))
+    #await asyncio.gather(mexcc(data))
+
+
+    # with open('filtr.txt', 'w', encoding='utf-8') as f:
+    #     json.dump(data, f, ensure_ascii=False, indent=4)
+    # print(len(data.keys()))
     
-#     дата_со_всеми_фандингами_и_тейкерами = чтобы_не_было_хуйни(data)
+    дата_со_всеми_фандингами_и_тейкерами = чтобы_не_было_хуйни(data)
 
-#     дата_минимум_2_биржи = {k: v for k, v in дата_со_всеми_фандингами_и_тейкерами.items() if len(v) >= 2}
-#     with open('filtr.txt', 'w', encoding='utf-8') as f:
-#         json.dump(дата_минимум_2_биржи, f, ensure_ascii=False, indent=4)
-#     print(len(дата_минимум_2_биржи.keys()))
-#     return дата_минимум_2_биржи
+    дата_минимум_2_биржи = {k: v for k, v in дата_со_всеми_фандингами_и_тейкерами.items() if len(v) >= 2}
+    with open('filtr.txt', 'w', encoding='utf-8') as f:
+        json.dump(дата_минимум_2_биржи, f, ensure_ascii=False, indent=4)
+    print(len(дата_минимум_2_биржи.keys()))
+    return дата_минимум_2_биржи
 
 
 #asyncio.run(api())

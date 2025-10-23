@@ -49,6 +49,7 @@ async def bingx(pair, limit):
             url="https://open-api.bingx.com/openApi/swap/v2/quote/depth", params=params
         ) as respone:
             order_book = await respone.json()
+            #print(order_book)
             asks = order_book["data"]["asks"]
             bids = order_book["data"]["bids"]
             await asyncio.sleep(0.2)
@@ -145,6 +146,6 @@ async def htx(pair, limit):
 # Ошибка тут: Не удалось получить order book для QTOUSDT на bingx
 # Ошибка тут: Не удалось получить order book для PINGPONGUSDT на bingx
 
-#asyncio.run(bingx("BTCUSDT", 20))
+#asyncio.run(bingx("FHEUSDT", 20))
 #GORKUSDT на bingx
 # tao hot
