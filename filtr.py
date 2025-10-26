@@ -230,12 +230,17 @@ async def safe_fetch_fundings(exchange, retries=5, delay=4, винйняток=N
                 semaphore = asyncio.Semaphore(20)  # "светофор" - пропускает максимум 20 запросов одновременно
                 
                 async def fetch_one(symbol):
-                    async with semaphore:  # ждём зелёного света (если уже 20 запросов идут - ждём)
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}") as response:
-                                fundings = await response.json()
-                                #print(f'пара добавилась {symbol}')
-                                return fundings
+                    for i in range(0, 6):
+                        
+                        async with semaphore:  # ждём зелёного света (если уже 20 запросов идут - ждём)
+                            try:
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}") as response:
+                                        fundings = await response.json()
+                                        #print(f'пара добавилась {symbol}')
+                                        return fundings
+                            except Exception as e:
+                                await asyncio.sleep(0.5)
                 
                 # Создаём задачи для ВСЕХ пар сразу
                 tasks = [fetch_one(k) for k in винйняток] # type: ignore
@@ -247,7 +252,7 @@ async def safe_fetch_fundings(exchange, retries=5, delay=4, винйняток=N
                     result.extend(batch_results)  # добавляем результаты
                     #print(f'Выполнено {i+20} из {len(tasks)} пар')
                     
-                    if i + 20 < len(tasks):  # если ещё есть пары - ждём 2 секунды
+                    if i + 20 < len(tasks):  # если ещё есть                # await asyncio.sleep(0.3) пары - ждём 2 секунды
                         await asyncio.sleep(2)
                 
                 return result
@@ -647,7 +652,7 @@ async def api():
     дата_минимум_2_биржи = {k: v for k, v in дата_со_всеми_фандингами_и_тейкерами.items() if len(v) >= 2}
     with open('filtr.txt', 'w', encoding='utf-8') as f:
         json.dump(дата_минимум_2_биржи, f, ensure_ascii=False, indent=4)
-    print(len(дата_минимум_2_биржи.keys()))
+    #print(len(дата_минимум_2_биржи.keys()))
     return дата_минимум_2_биржи
 
 
