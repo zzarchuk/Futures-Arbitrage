@@ -640,7 +640,7 @@ async def mexcc(data):
 async def api():
     data = {}
     await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data), bingxx(data), htxx(data))
-    #await asyncio.gather(mexcc(data))
+    #await asyncio.gather(mexcc(data), bingxx(data), bitgett(data))
 
 
     # with open('filtr.txt', 'w', encoding='utf-8') as f:

@@ -1,4 +1,5 @@
 from collections import defaultdict
+import requests
 
 
 словарь_с_ценами = {
@@ -144,3 +145,8 @@ from collections import defaultdict
             #print(f'Цена  покупки: {мин_цена}\nНа бирже: {мин_биржа}\nЦена продажи: {цена}\nНа бирже: {биржа}\nСпред: {спред_проценты}% / {спред_юсдт} USDT\nОбьем: {volume}\n\n\n')
 
 
+resp = requests.get("https://contract.mexc.com/api/v1/contract/detail").json()
+
+for k in resp['data']:
+    if k.get('symbol') == 'FLOCK_USDT':
+        print(k)
