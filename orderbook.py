@@ -11,7 +11,7 @@ async def kucoin(pair, limit, session):
         order_book = await respone.json()
         asks = order_book["data"]["asks"]
         bids = order_book["data"]["bids"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
 
@@ -24,7 +24,7 @@ async def binance(pair, limit, session):
         order_book = await respone.json()
         asks = order_book["asks"]
         bids = order_book["bids"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
 
@@ -36,7 +36,7 @@ async def bybit(pair, limit, session):
         order_book = await respone.json()
         asks = order_book["result"]["a"]
         bids = order_book["result"]["b"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
         # print(order_book['result'])
 
@@ -50,7 +50,7 @@ async def bingx(pair, limit, session):
         #print(order_book)
         asks = order_book["data"]["asks"]
         bids = order_book["data"]["bids"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
 
@@ -76,22 +76,24 @@ async def gate(pair, limit, session):
             [float(item["p"]), int(item["s"])]
             for item in order_book.get("bids", [])
         ]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
 
 async def mexc(pair, limit, session):
     params = {"limit": limit}
-    async with session.get(
-        url=f"https://contract.mexc.com/api/v1/contract/depth/{pair.replace('USDT', '_USDT')}",
-        params=params,
-    ) as respone:
-        order_book = await respone.json()
-        asks = order_book["data"]["asks"]
-        bids = order_book["data"]["bids"]
-        await asyncio.sleep(0.2)
-        return {"asks": asks, "bids": bids}
-
+    try:
+        async with session.get(
+            url=f"https://contract.mexc.com/api/v1/contract/depth/{pair.replace('USDT', '_USDT')}",
+            params=params,
+        ) as respone:
+            order_book = await respone.json()
+            asks = order_book["data"]["asks"]
+            bids = order_book["data"]["bids"]
+            #await asyncio.sleep(0.2)
+            return {"asks": asks, "bids": bids}
+    except Exception as e:
+        return e
 
 async def bitget(pair, limit, session):
     params = {"symbol": pair, "productType": "USDT-FUTURES", "limit": limit}
@@ -101,7 +103,7 @@ async def bitget(pair, limit, session):
         order_book = await respone.json()
         asks = order_book["data"]["asks"]
         bids = order_book["data"]["bids"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
 
@@ -114,7 +116,7 @@ async def okx(pair, limit, session):
         #print(order_book)
         asks = order_book["data"][0]["asks"]
         bids = order_book["data"][0]["bids"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
 
@@ -126,20 +128,13 @@ async def htx(pair, limit, session):
         order_book = await respone.json()
         asks = order_book["tick"]["asks"]
         bids = order_book["tick"]["bids"]
-        await asyncio.sleep(0.2)
+        #await asyncio.sleep(0.2)
         return {"asks": asks, "bids": bids}
 
-# Ошибка тут: Не удалось получить order book для PINGPONGUSDT на bingx
-# Ошибка тут: Не удалось получить order book для GOATEDUSDT на bingx
-# Ошибка тут: Не удалось получить order book для QTOUSDT на bingx
-# Ошибка тут: Не удалось получить order book для PINGPONGUSDT на bingx
-# Ошибка тут: Не удалось получить order book для GOATEDUSDT на bingx
-# Ошибка тут: Не удалось получить order book для QTOUSDT на bingx
-# Ошибка тут: Не удалось получить order book для PINGPONGUSDT на bingx
-# Ошибка тут: Не удалось получить order book для GOATEDUSDT на bingx
-# Ошибка тут: Не удалось получить order book для QTOUSDT на bingx
-# Ошибка тут: Не удалось получить order book для PINGPONGUSDT на bingx
 
-#asyncio.run(bingx("FHEUSDT", 20))
-#GORKUSDT на bingx
-# tao hot
+# async def main():
+#     async with aiohttp.ClientSession() as session:
+#         z = await mexc('DOGEUSDT', 100, session)
+#         print(z)
+    
+# asyncio.run(main())

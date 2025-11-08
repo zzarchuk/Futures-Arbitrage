@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Сообщения от бота</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #0e0e10;
+      color: #00ff99;
+      padding: 20px;
+    }
+    .msg {
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid #00ff99;
+      border-radius: 8px;
+      background: rgba(0, 255, 153, 0.05);
+      line-height: 1.4em;
+      transition: all 0.3s;
+      white-space: normal;
+    }
+    .msg.updated {
+      border-color: #ffaa00;
+      background: rgba(255,170,0,0.1);
+    }
+  </style>
+</head>
+<body>
+  <h2>Сигналы</h2>
+  <div id="messages"></div>
+
+  <script>
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    const messages = new Map();
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      // создаем сообщение
+      if (data.action === "create") {
+        const div = document.createElement("div");
+        div.className = "msg";
+        div.id = data.id;
+        div.innerHTML = data.text; // ✅ <--- ВОТ ТУТ ГЛАВНОЕ изменение
+        document.getElementById("messages").prepend(div);
+        messages.set(data.id, div);
+
+      // обновляем существующее сообщение
+      } else if (data.action === "update" && messages.has(data.id)) {
+        const div = messages.get(data.id);
+        div.innerHTML = data.text; // ✅ <--- тоже innerHTML
+        div.classList.add("updated");
+        setTimeout(() => div.classList.remove("updated"), 700);
+      }
+    };
+  </script>
+</body>
+</html>

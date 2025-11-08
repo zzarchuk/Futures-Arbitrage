@@ -15,7 +15,26 @@ import base64
 from datetime import datetime
 import json
 from urllib.parse import urlencode
+def мексяра(словарь):
+    to_delete = []  # сюда сохраним пары для удаления
+    
+    for symbol, exchanges in словарь.items():
+        for exchange, data in list(exchanges.items()):
+            if exchange == 'mexc':
+                max_vol = data.get('maxVol')
+                price = data.get('price')
+                if max_vol is not None and price is not None:
+                    if max_vol * price < 250 * 2:
+                        to_delete.append((symbol, exchange))
+    
+    # теперь удаляем безопасно после обхода
+    for symbol, exchange in to_delete:
+        del словарь[symbol][exchange]
+        # если после удаления биржи mexc у монеты не осталось других бирж
+        if not словарь[symbol]:
+            del словарь[symbol]
 
+    return словарь
 #пойми эту функцию
 def чтобы_не_было_хуйни(data):
     required_keys = {"funding", "maker"}
@@ -250,7 +269,7 @@ async def safe_fetch_fundings(exchange, retries=5, delay=4, винйняток=N
                     batch = tasks[i:i+20]  # берём 20 задач
                     batch_results = await asyncio.gather(*batch)  # запускаем их одновременно
                     result.extend(batch_results)  # добавляем результаты
-                    #print(f'Выполнено {i+20} из {len(tasks)} пар')
+                    #print(f'Выполнено funding {i+20} из {len(tasks)} пар')
                     
                     if i + 20 < len(tasks):  # если ещё есть                # await asyncio.sleep(0.3) пары - ждём 2 секунды
                         await asyncio.sleep(2)
@@ -274,8 +293,44 @@ async def safe_fetch_fundings(exchange, retries=5, delay=4, винйняток=N
             await asyncio.sleep(delay)
     return None
 
-
-
+async def safe_fetch_price(exchange, retries=5, delay=4, винйняток=None):
+    for i in range(retries):
+        try:
+            if exchange.id == 'mexc':
+                result = []
+                semaphore = asyncio.Semaphore(20)  # "светофор" - пропускает максимум 20 запросов одновременно
+                
+                async def fetch_one(symbol):
+                    for i in range(0, 6):
+                        
+                        async with semaphore:  # ждём зелёного света (если уже 20 запросов идут - ждём)
+                            try:
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(f"https://contract.mexc.com/api/v1/contract/fair_price/{symbol}") as response:
+                                        fundings = await response.json()
+                                        #print(f'пара добавилась {symbol}')
+                                        return fundings
+                            except Exception as e:
+                                await asyncio.sleep(0.5)
+                
+                # Создаём задачи для ВСЕХ пар сразу
+                tasks = [fetch_one(k) for k in винйняток] # type: ignore
+                
+                # Запускаем их батчами по 20 штук
+                for i in range(0, len(tasks), 20):
+                    batch = tasks[i:i+20]  # берём 20 задач
+                    batch_results = await asyncio.gather(*batch)  # запускаем их одновременно
+                    result.extend(batch_results)  # добавляем результаты
+                    #print(f'Выполнено price {i+20} из {len(tasks)} пар')
+                    
+                    if i + 20 < len(tasks):  # если ещё есть                # await asyncio.sleep(0.3) пары - ждём 2 секунды
+                        await asyncio.sleep(2)
+                
+                return result
+        except Exception as e:
+            print(f"NetworkError на {exchange.id}, попытка {i+1}/{retries}: {e}")
+            await asyncio.sleep(delay)
+    return None
 
 
 
@@ -311,7 +366,7 @@ async def get_time_until_funding(funding_timestamp: int, exchange_name) -> str:
 
 
 
-async def фильтрованный_словарь(data, symbol, exchange, maker=None, taker=None, funding=None, get_funding=None, index=None):
+async def фильтрованный_словарь(data, symbol, exchange, maker=None, taker=None, funding=None, get_funding=None, index=None, макс_обьем=None, price=None):
     if symbol not in data:
         data[symbol] = {}
     if exchange not in data[symbol]:
@@ -328,6 +383,13 @@ async def фильтрованный_словарь(data, symbol, exchange, make
     
     if index is not None:
         data[symbol][exchange]['index'] = index
+        
+    if макс_обьем is not None:
+        data[symbol][exchange]["maxVol"] = макс_обьем
+        
+    if price is not None:
+        data[symbol][exchange]["price"] = price
+
 
 
 async def bingxx(data):#есть
@@ -614,10 +676,21 @@ async def mexcc(data):
                     symbol = k.get('symbol').replace('_', '')
                     maker = float(k.get('makerFeeRate'))
                     taker = float(k.get('takerFeeRate'))
-                    await фильтрованный_словарь(data, symbol, exchange, maker=maker, taker=taker)
+                    макс_обьем = float(k.get('maxVol')) * float(k.get('contractSize')) if k.get('positionOpenType') == 3 else None
+                    await фильтрованный_словарь(data, symbol, exchange, maker=maker, taker=taker, макс_обьем=макс_обьем)
             #print('поиск комиссий окончился')
         
-        fundings = await safe_fetch_fundings(mexc, винйняток=вийняток)
+        fundings_task = safe_fetch_fundings(mexc, винйняток=вийняток)
+        price_task = safe_fetch_price(mexc, винйняток=вийняток)
+
+        fundings, price = await asyncio.gather(fundings_task, price_task)
+
+        #fundings = await safe_fetch_fundings(mexc, винйняток=вийняток)
+        if price is not None:
+            for k in price:
+                symbol = k['data'].get('symbol').replace('_', '')
+                fair_price = k['data'].get('fairPrice')
+                await фильтрованный_словарь(data, symbol, exchange, price=fair_price)
         
         if fundings is not None:
             for k in fundings:
@@ -639,8 +712,9 @@ async def mexcc(data):
 
 async def api():
     data = {}
-    await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data), bingxx(data), htxx(data))
-    #await asyncio.gather(mexcc(data), bingxx(data), bitgett(data))
+    #await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data), bingxx(data), htxx(data))
+    await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), bingxx(data), htxx(data))
+
 
 
     # with open('filtr.txt', 'w', encoding='utf-8') as f:
@@ -650,10 +724,11 @@ async def api():
     дата_со_всеми_фандингами_и_тейкерами = чтобы_не_было_хуйни(data)
 
     дата_минимум_2_биржи = {k: v for k, v in дата_со_всеми_фандингами_и_тейкерами.items() if len(v) >= 2}
+    фильтр_мекса = мексяра(дата_минимум_2_биржи)
     with open('filtr.txt', 'w', encoding='utf-8') as f:
         json.dump(дата_минимум_2_биржи, f, ensure_ascii=False, indent=4)
     #print(len(дата_минимум_2_биржи.keys()))
-    return дата_минимум_2_биржи
+    return фильтр_мекса
 
 
-#asyncio.run(api())
+# asyncio.run(api())
