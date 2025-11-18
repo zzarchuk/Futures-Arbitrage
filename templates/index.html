@@ -24,6 +24,10 @@
       border-color: #ffaa00;
       background: rgba(255,170,0,0.1);
     }
+    .msg.deleting {
+      opacity: 0;
+      transform: translateX(-20px);
+    }
   </style>
 </head>
 <body>
@@ -42,17 +46,37 @@
         const div = document.createElement("div");
         div.className = "msg";
         div.id = data.id;
-        div.innerHTML = data.text; // ✅ <--- ВОТ ТУТ ГЛАВНОЕ изменение
+        div.innerHTML = data.text;
         document.getElementById("messages").prepend(div);
         messages.set(data.id, div);
 
       // обновляем существующее сообщение
       } else if (data.action === "update" && messages.has(data.id)) {
         const div = messages.get(data.id);
-        div.innerHTML = data.text; // ✅ <--- тоже innerHTML
+        div.innerHTML = data.text;
         div.classList.add("updated");
         setTimeout(() => div.classList.remove("updated"), 700);
+      
+      // ✅ ДОБАВЬТЕ ЭТО:
+      } else if (data.action === "delete" && messages.has(data.id)) {
+        const div = messages.get(data.id);
+        
+        // Плавное удаление с анимацией
+        div.classList.add("deleting");
+        
+        setTimeout(() => {
+          div.remove();
+          messages.delete(data.id);
+        }, 300); // задержка под анимацию
       }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket closed");
     };
   </script>
 </body>

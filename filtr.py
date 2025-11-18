@@ -269,11 +269,11 @@ async def safe_fetch_fundings(exchange, retries=5, delay=4, винйняток=N
                     batch = tasks[i:i+20]  # берём 20 задач
                     batch_results = await asyncio.gather(*batch)  # запускаем их одновременно
                     result.extend(batch_results)  # добавляем результаты
+                    #print(result)
                     #print(f'Выполнено funding {i+20} из {len(tasks)} пар')
                     
                     if i + 20 < len(tasks):  # если ещё есть                # await asyncio.sleep(0.3) пары - ждём 2 секунды
                         await asyncio.sleep(2)
-                
                 return result
                 # print('поиск фандингов начался')
                 # result = []
@@ -680,24 +680,31 @@ async def mexcc(data):
                     await фильтрованный_словарь(data, symbol, exchange, maker=maker, taker=taker, макс_обьем=макс_обьем)
             #print('поиск комиссий окончился')
         
-        fundings_task = safe_fetch_fundings(mexc, винйняток=вийняток)
-        price_task = safe_fetch_price(mexc, винйняток=вийняток)
+        # fundings_task = safe_fetch_fundings(mexc, винйняток=вийняток)
+        # price_task = safe_fetch_price(mexc, винйняток=вийняток)
 
-        fundings, price = await asyncio.gather(fundings_task, price_task)
-
-        #fundings = await safe_fetch_fundings(mexc, винйняток=вийняток)
+        fundings, price = await asyncio.gather(
+            safe_fetch_fundings(mexc, винйняток=вийняток),
+            safe_fetch_price(mexc, винйняток=вийняток)
+        )
         if price is not None:
             for k in price:
-                symbol = k['data'].get('symbol').replace('_', '')
-                fair_price = k['data'].get('fairPrice')
-                await фильтрованный_словарь(data, symbol, exchange, price=fair_price)
+                try:
+                    symbol = k['data'].get('symbol').replace('_', '')
+                    fair_price = k['data'].get('fairPrice')
+                    await фильтрованный_словарь(data, symbol, exchange, price=fair_price)
+                except Exception as e:
+                    print(f'Ошибка прайса мекса {e}')
         
         if fundings is not None:
             for k in fundings:
-                symbol = k['data'].get('symbol').replace('_', '')
-                фандинг = k['data'].get('fundingRate')
-                начисление = k['data'].get('nextSettleTime')
-                await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление)
+                try:
+                    symbol = k['data'].get('symbol').replace('_', '')
+                    фандинг = k['data'].get('fundingRate')
+                    начисление = k['data'].get('nextSettleTime')
+                    await фильтрованный_словарь(data, symbol, exchange, funding=фандинг, get_funding=начисление)
+                except Exception as e:
+                    print(f'Ошибка фандинга мекса {e}')
                 
                 
                 
@@ -709,26 +716,25 @@ async def mexcc(data):
 #lbank xt bitmart 
 
 
-
 async def api():
     data = {}
-    #await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data), bingxx(data), htxx(data))
-    await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), bingxx(data), htxx(data))
+    await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), mexcc(data), bingxx(data), htxx(data))
+    #await asyncio.gather(binancee(data=data), bybitt(data), bitgett(data), gatee(data), kucoinn(data), okxx(data), bingxx(data), htxx(data))
 
 
 
     # with open('filtr.txt', 'w', encoding='utf-8') as f:
     #     json.dump(data, f, ensure_ascii=False, indent=4)
     # print(len(data.keys()))
-    
-    дата_со_всеми_фандингами_и_тейкерами = чтобы_не_было_хуйни(data)
+    фильтр_мекса = мексяра(data)
+    дата_со_всеми_фандингами_и_тейкерами = чтобы_не_было_хуйни(фильтр_мекса)
 
     дата_минимум_2_биржи = {k: v for k, v in дата_со_всеми_фандингами_и_тейкерами.items() if len(v) >= 2}
-    фильтр_мекса = мексяра(дата_минимум_2_биржи)
+    #фильтр_мекса = мексяра(дата_минимум_2_биржи)
     with open('filtr.txt', 'w', encoding='utf-8') as f:
         json.dump(дата_минимум_2_биржи, f, ensure_ascii=False, indent=4)
     #print(len(дата_минимум_2_биржи.keys()))
-    return фильтр_мекса
+    return дата_минимум_2_биржи
 
 
 # asyncio.run(api())

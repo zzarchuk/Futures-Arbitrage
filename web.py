@@ -49,3 +49,17 @@ async def send_message_to_site(text: str, message_id: str | None = None):
                 clients.remove(ws)
 
     return message_id  # возвращаем ID, чтобы потом обновить это сообщение
+
+
+async def delete_message_from_site(message_id: str):
+    """
+    Удаляет сообщение с указанным message_id на всех подключённых клиентах.
+    """
+    data = {"action": "delete", "id": message_id}
+
+    async with lock:
+        for ws in list(clients):
+            try:
+                await ws.send_json(data)
+            except:
+                clients.remove(ws)
