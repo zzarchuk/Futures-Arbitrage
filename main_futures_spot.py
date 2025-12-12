@@ -6,11 +6,12 @@ import aiohttp
 from collections import defaultdict
 import time
 from filtr import get_time_until_funding
+from aiolimiter import AsyncLimiter
 
 выполненые = 0
 выполненые_lock = asyncio.Lock()
 
-blacklist = []
+blacklist = ['PAYAIUSDT', 'GAIBUSDT', 'AIAUSDT', 'NUMIUSDT']
 
 мин_спред = 6
 
@@ -19,417 +20,479 @@ opportunitiess = set()
 работающие_арбитражи = set()
 работающие_арбитражи_lock = asyncio.Lock()
 
-светлофор_для_арбитража = asyncio.Semaphore(10)
+светлофор_для_арбитража = asyncio.Semaphore(15)
 
 
-async def safe_fetch_fundings(exchange, symbol, sessions, retries=3, delay=0.5):
-    #async with светлофор_для_фандинга:
+
+светлофоры = {
+    'binance': AsyncLimiter(15, 1),
+    'bybit': AsyncLimiter(15, 1),
+    'bingx': AsyncLimiter(12, 1),
+    'mexc': AsyncLimiter(1, 0.13),
+    'okx': AsyncLimiter(13, 1),
+    'gateio': AsyncLimiter(13, 1),
+    'lbank': AsyncLimiter(12, 1),
+    'kucoin': AsyncLimiter(12, 1),
+    'bitget': AsyncLimiter(12, 1),
+    'htx': AsyncLimiter(12, 1)
+}
+
+
+funding_cache = {}
+funding_cache_lock = asyncio.Lock()
+FUNDING_CACHE_TTL = 300  # 5 минут в секундах
+
+async def get_cached_funding(exchange, symbol, session):
+    """
+    Получает фандинг из кэша или запрашивает новый, если кэш устарел
+    """
+    cache_key = f"{exchange}_{symbol}"
+    current_time = time.time()
+    
+    async with funding_cache_lock:
+        # Проверяем, есть ли актуальные данные в кэше
+        if cache_key in funding_cache:
+            cached_data, timestamp = funding_cache[cache_key]
+            if current_time - timestamp < FUNDING_CACHE_TTL:
+                return cached_data
+    
+    # Кэш устарел или отсутствует - запрашиваем новые данные
+    try:
+        funding_info = await safe_fetch_fundings(exchange, symbol, session)
+        if funding_info is None:
+            funding_info = (0, "нет данных")
+        
+        # Сохраняем в кэш
+        async with funding_cache_lock:
+            funding_cache[cache_key] = (funding_info, current_time)
+        
+        return funding_info
+    except Exception as e:
+        print(f"Ошибка при fetch funding на {exchange}: {e}")
+        return (0, "нет данных")
+
+
+async def safe_fetch_fundings(exchange, symbol, sessions, retries=3, delay=0.2):
+    sem = светлофоры.get(exchange)
+    
+    async with sem: # type: ignore
         #await asyncio.sleep(2)
-    for i in range(retries):
-        try:
-            session = sessions.get(exchange)
-            if exchange == "bingx":
-                #print('Попытка бингх')
-                symboll = symbol.replace('USDT', '-USDT')
-                async with session.get(
-                    url=f"https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex?symbol={symboll}"
-                ) as response:
-                    fundings = await response.json()
-                    #print(f'BINGX  {fundings}\n\n')
-                    return float(
-                        fundings["data"].get("lastFundingRate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=fundings["data"].get("nextFundingTime"),
-                    )
-            elif exchange == "binance":
-                async with session.get(
-                    url=f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}"
-                ) as response:
-                    fundings = await response.json()
-                    return float(
-                        fundings.get("lastFundingRate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=fundings.get("nextFundingTime"),
-                    )
-            elif exchange == "bybit":
-                url = "https://api.bybit.com/v5/market/tickers"
-                params = {
-                    "category": "linear",  # "spot", "linear", "inverse"
-                    "symbol": symbol,
-                }
-                async with session.get(url, params=params) as resp:
-                    fundings = await resp.json()
-                    return float(
-                        fundings["result"]["list"][0].get("fundingRate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=int(
-                            fundings["result"]["list"][0].get("nextFundingTime")
-                        ),
-                    )
-            elif exchange == "bitget":
-                async with session.get(
-                    url=f"https://api.bitget.com/api/v2/mix/market/current-fund-rate?symbol={symbol}&productType=usdt-futures"
-                ) as respone:
-                    fundings = await respone.json()
-                    return float(
-                        fundings["data"][0].get("fundingRate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=int(
-                            fundings["data"][0].get("nextUpdate")
-                        ),
-                    )
-            elif exchange == "gateio":
-                async with session.get(
-                    url=f"https://api.gateio.ws/api/v4/futures/usdt/contracts/{symbol.replace('USDT', '_USDT')}",
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    },
-                ) as respone:
-                    fundings_and_fees_gate = await respone.json()
-                    return float(
-                        fundings_and_fees_gate.get("funding_rate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=int(
-                            fundings_and_fees_gate.get("funding_next_apply")
-                        ),
-                    )
-            elif exchange == "htx":
-                async with session.get(
-                    url=f"https://api.hbdm.com/linear-swap-api/v1/swap_funding_rate?contract_code={symbol.replace('USDT', '-USDT')}"
-                ) as respone:
-                    
-                    try:
-                        fundings = await respone.json(content_type=None)
+        for i in range(retries):
+            try:
+                session = sessions.get(exchange)
+                if exchange == "bingx":
+                    #print('Попытка бингх')
+                    symboll = symbol.replace('USDT', '-USDT')
+                    async with session.get(
+                        url=f"https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex?symbol={symboll}"
+                    ) as response:
+                        fundings = await response.json()
+                        #print(f'BINGX  {fundings}\n\n')
+                        return float(
+                            fundings["data"].get("lastFundingRate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=fundings["data"].get("nextFundingTime"),
+                        )
+                elif exchange == "binance":
+                    async with session.get(
+                        url=f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}"
+                    ) as response:
+                        fundings = await response.json()
+                        return float(
+                            fundings.get("lastFundingRate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=fundings.get("nextFundingTime"),
+                        )
+                elif exchange == "bybit":
+                    url = "https://api.bybit.com/v5/market/tickers"
+                    params = {
+                        "category": "linear",  # "spot", "linear", "inverse"
+                        "symbol": symbol,
+                    }
+                    async with session.get(url, params=params) as resp:
+                        fundings = await resp.json()
+                        return float(
+                            fundings["result"]["list"][0].get("fundingRate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=int(
+                                fundings["result"]["list"][0].get("nextFundingTime")
+                            ),
+                        )
+                elif exchange == "bitget":
+                    async with session.get(
+                        url=f"https://api.bitget.com/api/v2/mix/market/current-fund-rate?symbol={symbol}&productType=usdt-futures"
+                    ) as respone:
+                        fundings = await respone.json()
+                        return float(
+                            fundings["data"][0].get("fundingRate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=int(
+                                fundings["data"][0].get("nextUpdate")
+                            ),
+                        )
+                elif exchange == "gateio":
+                    async with session.get(
+                        url=f"https://api.gateio.ws/api/v4/futures/usdt/contracts/{symbol.replace('USDT', '_USDT')}",
+                        headers={
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                        },
+                    ) as respone:
+                        fundings_and_fees_gate = await respone.json()
+                        return float(
+                            fundings_and_fees_gate.get("funding_rate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=int(
+                                fundings_and_fees_gate.get("funding_next_apply")
+                            ),
+                        )
+                elif exchange == "htx":
+                    async with session.get(
+                        url=f"https://api.hbdm.com/linear-swap-api/v1/swap_funding_rate?contract_code={symbol.replace('USDT', '-USDT')}"
+                    ) as respone:
                         
-                    except Exception:
-                        return 0, 'нет данных'
-                    return float(
-                        fundings["data"].get("funding_rate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=int(fundings["data"].get("funding_time")),
-                    )
-            elif exchange == "kucoin":
-                async with session.get(
-                    f"https://api-futures.kucoin.com/api/v1/contracts/{symbol.replace('USDT', 'USDTM')}"
-                ) as respone:
-                    fundings_and_fees_kucoin = await respone.json()
-                    return float(
-                        fundings_and_fees_kucoin["data"].get("fundingFeeRate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=int(
-                            fundings_and_fees_kucoin["data"].get(
-                                "nextFundingRateDateTime"
-                            )
-                        ),
-                    )
-            elif exchange == "okx":
-                async with session.get(
-                    url=f"https://www.okx.com/api/v5/public/funding-rate?instId={symbol.replace('USDT', '-USDT-SWAP')}"
-                ) as respone:
-                    fundings = await respone.json()
-                    return float(
-                        fundings["data"][0].get("fundingRate")
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=int(
-                            fundings["data"][0].get("fundingTime")
-                        ),
-                    )
-            elif exchange == "mexc":
-                async with session.get(
-                    url=f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol.replace('USDT', '_USDT')}"
-                ) as respone:
-                    fundings = await respone.json()
-                    return fundings["data"].get(
-                        "fundingRate"
-                    ) * 100, await get_time_until_funding(
-                        exchange_name=exchange,
-                        funding_timestamp=fundings["data"].get("nextSettleTime"),
-                    )
-            elif exchange == "lbank":
-                # async with session.get(
-                #     url=f"https://lbkperp.lbank.com/cfd/openApi/v1/pub/marketData?productGroup=SwapU"
-                # ) as respone:
-                #     fundings = await respone.json()
-                #     for k in fundings['data']:
-                #         if k == symbol:
-                #             return float(k.get('fundingRate')) * 100, await get_time_until_funding(exchange_name=exchange, funding_timestamp=k.get('nextFeeTime'))
-                return 0, 'нет данных'
-            else:
-                print("хуйня")
-        except Exception as e:
-            #print(f"NetworkError на {exchange} {symbol}, попытка {i+1}/{retries}: {e}")
-            await asyncio.sleep(delay)
-    #raise Exception(f"Не удалось получить funding для {symbol} на {exchange}")
-    return None
+                        try:
+                            fundings = await respone.json(content_type=None)
+                            
+                        except Exception:
+                            return 0, 'нет данных'
+                        return float(
+                            fundings["data"].get("funding_rate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=int(fundings["data"].get("funding_time")),
+                        )
+                elif exchange == "kucoin":
+                    async with session.get(
+                        f"https://api-futures.kucoin.com/api/v1/contracts/{symbol.replace('USDT', 'USDTM')}"
+                    ) as respone:
+                        fundings_and_fees_kucoin = await respone.json()
+                        return float(
+                            fundings_and_fees_kucoin["data"].get("fundingFeeRate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=int(
+                                fundings_and_fees_kucoin["data"].get(
+                                    "nextFundingRateDateTime"
+                                )
+                            ),
+                        )
+                elif exchange == "okx":
+                    async with session.get(
+                        url=f"https://www.okx.com/api/v5/public/funding-rate?instId={symbol.replace('USDT', '-USDT-SWAP')}"
+                    ) as respone:
+                        fundings = await respone.json()
+                        return float(
+                            fundings["data"][0].get("fundingRate")
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=int(
+                                fundings["data"][0].get("fundingTime")
+                            ),
+                        )
+                elif exchange == "mexc":
+                    async with session.get(
+                        url=f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol.replace('USDT', '_USDT')}"
+                    ) as respone:
+                        fundings = await respone.json()
+                        return fundings["data"].get(
+                            "fundingRate"
+                        ) * 100, await get_time_until_funding(
+                            exchange_name=exchange,
+                            funding_timestamp=fundings["data"].get("nextSettleTime"),
+                        )
+                elif exchange == "lbank":
+                    # async with session.get(
+                    #     url=f"https://lbkperp.lbank.com/cfd/openApi/v1/pub/marketData?productGroup=SwapU"
+                    # ) as respone:
+                    #     fundings = await respone.json()
+                    #     for k in fundings['data']:
+                    #         if k == symbol:
+                    #             return float(k.get('fundingRate')) * 100, await get_time_until_funding(exchange_name=exchange, funding_timestamp=k.get('nextFeeTime'))
+                    return 0, 'нет данных'
+                else:
+                    print("хуйня")
+            except Exception as e:
+                print(f"{exchange} {symbol}, попытка {i+1}/{retries}: {e}")
+                await asyncio.sleep(delay)
+        #raise Exception(f"Не удалось получить funding для {symbol} на {exchange}")
+        return None
 
-async def safe_fetch_order_book_spot(exchange, symbol, sessions, retries=3, delay=0.5):
-    for i in range(retries):
-        try:
-            session = sessions.get(exchange)
-            if exchange == "bingx":
-                symboll = symbol.replace('USDT', '-USDT')
-                async with session.get(
-                    url=f"https://open-api.bingx.com/openApi/spot/v1/market/depth?symbol={symboll}&limit=100"
-                ) as response:
-                    order_book = await response.json()
+async def safe_fetch_order_book_spot(exchange, symbol, sessions, retries=3, delay=0.2):
+    sem = светлофоры.get(exchange)
+    async with sem: # type: ignore
+        #await asyncio.sleep(2.2)
+        for i in range(retries):
+            try:
+                session = sessions.get(exchange)
+                if exchange == "bingx":
+                    symboll = symbol.replace('USDT', '-USDT')
+                    async with session.get(
+                        url=f"https://open-api.bingx.com/openApi/spot/v1/market/depth?symbol={symboll}&limit=100"
+                    ) as response:
+                        order_book = await response.json()
 
-                    asks = order_book['data']['asks']
-                    bids = order_book['data']['bids']
-                    
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "binance":
-                async with session.get(
-                    url=f"https://api.binance.com/api/v3/depth?symbol={symbol}"
-                ) as response:
-                    order_book = await response.json()
-                    asks = order_book['asks']
-                    bids = order_book['bids']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "bybit":
-                url = "https://api.bybit.com/v5/market/orderbook"
-                params = {
-                    "category": "spot",  # "spot", "linear", "inverse"
-                    "symbol": symbol,
-                    'limit': 100
-                }
-                async with session.get(url, params=params) as resp:
-                    order_book = await resp.json()
-                    asks = order_book['result']['a']
-                    bids = order_book['result']['b']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "bitget":
-                async with session.get(
-                    url=f"https://api.bitget.com/api/v2/spot/market/orderbook?symbol={symbol}&type=step0&limit=100"
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book['data']['asks']
-                    bids = order_book['data']['bids']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "gateio":
-                async with session.get(
-                    url=f"https://api.gateio.ws/api/v4/spot/order_book?currency_pair={symbol.replace('USDT', '_USDT')}&limit=100",
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    },
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book['asks']
-                    bids = order_book['bids']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "htx":
-                async with session.get(
-                    url=f"https://api.huobi.pro/market/fullMbp?symbol={symbol.lower()}"
-                ) as respone:
-                    order_book = await respone.json()
-                    #print(order_book)
-                    asks = order_book['tick']['asks']
-                    bids = order_book['tick']['bids']
-                    
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "kucoin":
-                async with session.get(
-                    f"https://api.kucoin.com/api/v1/market/orderbook/level2_{100}?symbol={symbol.replace('USDT', '-USDT')}"
-                ) as respone:
-                    order_book = await respone.json()
-                    
-                    asks = order_book['data']['asks']
-                    bids = order_book['data']['bids']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}                   
-            elif exchange == "okx":
-                async with session.get(
-                    url=f"https://www.okx.com/api/v5/market/books?instId={symbol.replace('USDT', '-USDT')}&sz=100"
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book['data'][0]['asks']
-                    bids = order_book['data'][0]['bids']
-                    
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}    
-            elif exchange == "mexc":
-                async with session.get(
-                    url=f"https://api.mexc.com/api/v3/depth?symbol={symbol}"
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book['asks']
-                    bids = order_book['bids']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
-            elif exchange == "lbank":
-                async with session.get(
-                    url=f"https://api.lbank.info/v2/depth.do?symbol={symbol.lower().replace('usdt', '_usdt')}&size=100"
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book['data']['asks']
-                    bids = order_book['data']['bids']
-                    #print({'asks': asks, 'bids': bids})
-                    return {'asks': asks, 'bids': bids}
+                        asks = order_book['data']['asks']
+                        bids = order_book['data']['bids']
+                        
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "binance":
+                    async with session.get(
+                        url=f"https://api.binance.com/api/v3/depth?symbol={symbol}"
+                    ) as response:
+                        order_book = await response.json()
+                        asks = order_book['asks']
+                        bids = order_book['bids']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "bybit":
+                    url = "https://api.bybit.com/v5/market/orderbook"
+                    params = {
+                        "category": "spot",  # "spot", "linear", "inverse"
+                        "symbol": symbol,
+                        'limit': 100
+                    }
+                    async with session.get(url, params=params) as resp:
+                        order_book = await resp.json()
+                        asks = order_book['result']['a']
+                        bids = order_book['result']['b']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "bitget":
+                    async with session.get(
+                        url=f"https://api.bitget.com/api/v2/spot/market/orderbook?symbol={symbol}&type=step0&limit=100"
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book['data']['asks']
+                        bids = order_book['data']['bids']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "gateio":
+                    async with session.get(
+                        url=f"https://api.gateio.ws/api/v4/spot/order_book?currency_pair={symbol.replace('USDT', '_USDT')}&limit=100",
+                        headers={
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                        },
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book['asks']
+                        bids = order_book['bids']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "htx":
+                    async with session.get(
+                        url=f"https://api.huobi.pro/market/fullMbp?symbol={symbol.lower()}"
+                    ) as respone:
+                        order_book = await respone.json()
+                        #print(order_book)
+                        asks = order_book['tick']['asks']
+                        bids = order_book['tick']['bids']
+                        
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "kucoin":
+                    async with session.get(
+                        f"https://api.kucoin.com/api/v1/market/orderbook/level2_{100}?symbol={symbol.replace('USDT', '-USDT')}"
+                    ) as respone:
+                        order_book = await respone.json()
+                        
+                        asks = order_book['data']['asks']
+                        bids = order_book['data']['bids']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}                   
+                elif exchange == "okx":
+                    async with session.get(
+                        url=f"https://www.okx.com/api/v5/market/books?instId={symbol.replace('USDT', '-USDT')}&sz=100"
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book['data'][0]['asks']
+                        bids = order_book['data'][0]['bids']
+                        
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}    
+                elif exchange == "mexc":
+                    async with session.get(
+                        url=f"https://api.mexc.com/api/v3/depth?symbol={symbol}"
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book['asks']
+                        bids = order_book['bids']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
+                elif exchange == "lbank":
+                    async with session.get(
+                        url=f"https://api.lbank.info/v2/depth.do?symbol={symbol.lower().replace('usdt', '_usdt')}&size=100"
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book['data']['asks']
+                        bids = order_book['data']['bids']
+                        #print({'asks': asks, 'bids': bids})
+                        return {'asks': asks, 'bids': bids}
 
-            else:
-                print("хуйня")
-        except Exception as e:
-            print(e)
-            await asyncio.sleep(delay)
-    return None
+                else:
+                    print("хуйня")
+            except Exception as e:
+                print(e)
+                await asyncio.sleep(delay)
+        return None
 
 async def safe_fetch_order_book(
-    exchange, pair, sessions, limit=100, retries=3, delay=0.5
+    exchange, pair, sessions, limit=100, retries=3, delay=0.2
 ):
-    #async with светлофор:
-        #await asyncio.sleep(2)
-    for attempt in range(retries):
-        try:
-            session = sessions.get(exchange)
-            if exchange == "binance":
-                params = {"symbol": pair, "limit": limit}
+    sem = светлофоры.get(exchange)
 
-                async with session.get(
-                    url="https://fapi.binance.com/fapi/v1/depth", params=params
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["asks"]
-                    bids = order_book["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "kucoin":
-                z = pair.replace("USDT", "USDTM")
+    async with sem: # type: ignore
+        #await asyncio.sleep(2.2)
+        for attempt in range(retries):
+            try:
+                session = sessions.get(exchange)
+                if exchange == "binance":
+                    params = {"symbol": pair, "limit": limit}
 
-                async with session.get(
-                    f"https://api-futures.kucoin.com/api/v1/level2/depth{limit}?symbol={z}"
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["data"]["asks"]
-                    bids = order_book["data"]["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "mexc":
-                params = {"limit": limit}
-                async with session.get(
-                    url=f"https://contract.mexc.com/api/v1/contract/depth/{pair.replace('USDT', '_USDT')}",
-                    params=params,
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["data"]["asks"]
-                    bids = order_book["data"]["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "htx":
-                params = {"contract_code": pair.replace("USDT", "-USDT"), "type": "step0"}
-                async with session.get(
-                    url="https://api.hbdm.com/linear-swap-ex/market/depth", params=params
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["tick"]["asks"]
-                    bids = order_book["tick"]["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "bybit":
-                params = {"category": "linear", "symbol": pair, "limit": limit}
-                async with session.get(
-                    url="https://api.bybit.com/v5/market/orderbook", params=params
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["result"]["a"]
-                    bids = order_book["result"]["b"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "bingx":
-                params = {"symbol": pair.replace("USDT", "-USDT"), "limit": limit}
-                async with session.get(
-                    url="https://open-api.bingx.com/openApi/swap/v2/quote/depth", params=params
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["data"]["asks"]
-                    bids = order_book["data"]["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "bitget":
-                params = {"symbol": pair, "productType": "USDT-FUTURES", "limit": limit}
-                async with session.get(
-                    url="https://api.bitget.com/api/v2/mix/market/merge-depth", params=params
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["data"]["asks"]
-                    bids = order_book["data"]["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "gateio":
-                params = {
-                    "contract": pair.replace("USDT", "_USDT"),
-                    "limit": limit,
-                    "settle": "USDT",
-                }
-                headers = {"Accept": "application/json", "Content-Type": "application/json"}
+                    async with session.get(
+                        url="https://fapi.binance.com/fapi/v1/depth", params=params
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book["asks"]
+                        bids = order_book["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "kucoin":
+                    z = pair.replace("USDT", "USDTM")
 
-                async with session.get(
-                    url="https://api.gateio.ws/api/v4/futures/usdt/order_book",
-                    params=params,
-                    headers=headers,
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = [
-                        [float(item["p"]), int(item["s"])]
-                        for item in order_book.get("asks", [])
-                    ]
-                    bids = [
-                        [float(item["p"]), int(item["s"])]
-                        for item in order_book.get("bids", [])
-                    ]
-                    
-                    
-                    return {"asks": asks, "bids": bids}
-            elif exchange == "okx":
-                params = {"instId": pair.replace("USDT", "-USDT-SWAP"), "sz": limit}
-                async with session.get(
-                    url="https://www.okx.com/api/v5/market/books", params=params
-                ) as respone:
-                    order_book = await respone.json()
-                    asks = order_book["data"][0]["asks"]
-                    bids = order_book["data"][0]["bids"]
-                    return {"asks": asks, "bids": bids}
-            elif exchange == 'lbank':
-                #print('работа')
-                async with session.get(
-                    url=f"https://lbkperp.lbank.com/cfd/openApi/v1/pub/marketOrder?depth=50&symbol={pair}"
-                ) as respone:
-                    data = await respone.json()
-                    
-                    asks = data['data']['asks']
-                    bids = data['data']['bids']
+                    async with session.get(
+                        f"https://api-futures.kucoin.com/api/v1/level2/depth{limit}?symbol={z}"
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book["data"]["asks"]
+                        bids = order_book["data"]["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "mexc":
+                    params = {"limit": 10}
+                    async with session.get(
+                        url=f"https://contract.mexc.com/api/v1/contract/depth/{pair.replace('USDT', '_USDT')}",
+                        params=params,
+                    ) as respone:
+                        order_book = await respone.json()
+                        if "data" not in order_book and "asks" not in order_book:
+                            print("MEXC ERROR:", order_book)
+                            return None
+                        asks = order_book["data"]["asks"]
+                        bids = order_book["data"]["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "htx":
+                    params = {"contract_code": pair.replace("USDT", "-USDT"), "type": "step0"}
+                    async with session.get(
+                        url="https://api.hbdm.com/linear-swap-ex/market/depth", params=params
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book["tick"]["asks"]
+                        bids = order_book["tick"]["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "bybit":
+                    params = {"category": "linear", "symbol": pair, "limit": limit}
+                    async with session.get(
+                        url="https://api.bybit.com/v5/market/orderbook", params=params
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book["result"]["a"]
+                        bids = order_book["result"]["b"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "bingx":
+                    params = {"symbol": pair.replace("USDT", "-USDT"), "limit": limit}
+                    async with session.get(
+                        url="https://open-api.bingx.com/openApi/swap/v2/quote/depth", params=params
+                    ) as respone:
+                        order_book = await respone.json()
+                        if "data" not in order_book and "asks" not in order_book:
+                            print("BINGX ERROR:", order_book)
+                            return None
+                        asks = order_book["data"]["asks"]
+                        bids = order_book["data"]["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "bitget":
+                    params = {"symbol": pair, "productType": "USDT-FUTURES", "limit": limit}
+                    async with session.get(
+                        url="https://api.bitget.com/api/v2/mix/market/merge-depth", params=params
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book["data"]["asks"]
+                        bids = order_book["data"]["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "gateio":
+                    params = {
+                        "contract": pair.replace("USDT", "_USDT"),
+                        "limit": limit,
+                        "settle": "USDT",
+                    }
+                    headers = {"Accept": "application/json", "Content-Type": "application/json"}
 
-                    formatted_asks = []
-                    for ask in asks:
-                        price = float(ask['price'])
-                        volume = float(ask['volume'])
-                        orders = int(ask['orders'])
-                        formatted_asks.append([price, volume])
+                    async with session.get(
+                        url="https://api.gateio.ws/api/v4/futures/usdt/order_book",
+                        params=params,
+                        headers=headers,
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = [
+                            [float(item["p"]), int(item["s"])]
+                            for item in order_book.get("asks", [])
+                        ]
+                        bids = [
+                            [float(item["p"]), int(item["s"])]
+                            for item in order_book.get("bids", [])
+                        ]
                         
-                    formatted_bids = []
-                    for bid in bids:
-                        price = float(bid['price'])
-                        volume = float(bid['volume'])
-                        orders = int(bid['orders'])
-                        formatted_bids.append([price, volume])
-                    #print(f'\n\nasks: {formatted_asks}\nbids{formatted_bids}\n{pair}\n\n')
-                    return {"asks": formatted_asks, "bids": formatted_bids}
-            else:
-                print(f"Говно какое-то")
+                        
+                        return {"asks": asks, "bids": bids}
+                elif exchange == "okx":
+                    params = {"instId": pair.replace("USDT", "-USDT-SWAP"), "sz": limit}
+                    async with session.get(
+                        url="https://www.okx.com/api/v5/market/books", params=params
+                    ) as respone:
+                        order_book = await respone.json()
+                        asks = order_book["data"][0]["asks"]
+                        bids = order_book["data"][0]["bids"]
+                        return {"asks": asks, "bids": bids}
+                elif exchange == 'lbank':
+                    #print('работа')
+                    async with session.get(
+                        url=f"https://lbkperp.lbank.com/cfd/openApi/v1/pub/marketOrder?depth=50&symbol={pair}"
+                    ) as respone:
+                        data = await respone.json()
+                        
+                        asks = data['data']['asks']
+                        bids = data['data']['bids']
 
-            #return result
-        except Exception as e:
-            #print(f"{exchange} Ошибка {pair}, попытка {attempt+1}/{retries}: {e}")
-            await asyncio.sleep(delay)
-    #raise Exception(f"Не удалось получить order book для {pair} на {exchange}")
-    return None
+                        formatted_asks = []
+                        for ask in asks:
+                            price = float(ask['price'])
+                            volume = float(ask['volume'])
+                            orders = int(ask['orders'])
+                            formatted_asks.append([price, volume])
+                            
+                        formatted_bids = []
+                        for bid in bids:
+                            price = float(bid['price'])
+                            volume = float(bid['volume'])
+                            orders = int(bid['orders'])
+                            formatted_bids.append([price, volume])
+                        #print(f'\n\nasks: {formatted_asks}\nbids{formatted_bids}\n{pair}\n\n')
+                        return {"asks": formatted_asks, "bids": formatted_bids}
+                else:
+                    print(f"Говно какое-то")
+
+                #return result
+            except Exception as e:
+                print(f"Фьючи {exchange} Ошибка {pair}, попытка {attempt+1}/{retries}: {e}")
+                await asyncio.sleep(delay)
+        #raise Exception(f"Не удалось получить order book для {pair} на {exchange}")
+        return None
 
 async def fetch_orderbook_and_funding(exchange, symbol, session, type):
     """
@@ -441,18 +504,19 @@ async def fetch_orderbook_and_funding(exchange, symbol, session, type):
             order_book = await safe_fetch_order_book(exchange, symbol, session)
         except Exception as e:
             print(f"Ошибка при fetch order book на {exchange}: {e}")
-            #order_book = None
+            order_book = None
             
 
-            
-        try:
-            funding_info = await safe_fetch_fundings(exchange, symbol, session)
-        except Exception as e:
-            print(f"Ошибка при fetch funding на {exchange}: {e}")
-            funding_info = (0, "нет данных")
+        # try:
+        #     funding_info = await safe_fetch_fundings(exchange, symbol, session)
+        # except Exception as e:
+        #     print(f"Ошибка при fetch funding на {exchange}: {e}")
+        #     funding_info = (0, "нет данных")
+        funding_info = await get_cached_funding(exchange, symbol, session)
             
         if funding_info is None:
             funding_info = (0, "нет данных")
+        #funding_info = (0, "нет данных")
             
         return exchange, order_book, funding_info, type
     if type == 'spot':
@@ -460,22 +524,18 @@ async def fetch_orderbook_and_funding(exchange, symbol, session, type):
             order_book = await safe_fetch_order_book_spot(exchange, symbol, session)
         except Exception as e:
             print(f"Ошибка при fetch order book на {exchange}: {e}")
-            #order_book = None
+            order_book = None
 
             
         return exchange, order_book, None, type
 
-
-
-            
 async def арбитраж(пары, мин_обьем, макс_обьем, шаг, session):
-    global выполненые
-    global opportunitiess
-    global работающие_арбитражи_lock
-    global работающие_арбитражи
-    работа = 0
+    """
+    Генерирует словарь подписок по найденным арбитражным символам.
+    """
+    subscriptions_config = {}
+    
     for symbol, exchanges in пары.items():
-
         # ---- 1. Находим минимальную цену ----
         min_exchange, min_market_type, min_price = min(
             (
@@ -489,106 +549,103 @@ async def арбитраж(пары, мин_обьем, макс_обьем, ш�
         if min_price == 0:
             continue
 
-        opportunities = []
-        arb_exchanges = []  # ← список бирж с арбитражом
-        found = False
-
         # ---- 2. Проверяем арбитраж ----
         for exchange, types in exchanges.items():
-            for type, data in types.items():
+            for market_type, data in types.items():
 
+                # Пропускаем минимальную цену и неарбитражные комбинации
                 if (min_exchange == exchange or 
-                    (min_market_type, type) in [('spot', 'spot'), ('futures', 'spot')]):
+                    (min_market_type, market_type) in [('spot', 'spot'), ('futures', 'spot')]):
                     continue
 
                 spread = ((data.get('price') - min_price) / min_price * 100)
 
-                if spread >= 2:
-                    async with работающие_арбитражи_lock:
-                        if symbol in работающие_арбитражи:
-                            continue
-                        работающие_арбитражи.add(symbol)
-                        работа += 1
+                if spread >= 4:
+                    # Добавляем в словарь подписок
+                    if symbol not in subscriptions_config:
+                        subscriptions_config[symbol] = {}
+                    if exchange not in subscriptions_config[symbol]:
+                        subscriptions_config[symbol][exchange] = []
 
-                    asyncio.create_task(
-                        арбитраж_повтор({symbol: exchanges}, мин_обьем, макс_обьем, шаг, session)
-                    )
-    while True:
-        async with выполненые_lock:
-            print(f'работающие {работа} выполнение {выполненые}\n\n')
-            if работа == выполненые:
-                print('запускаемся по новой')
-                выполненые = 0
-                return
+                    if market_type not in subscriptions_config[symbol][exchange]:
+                        subscriptions_config[symbol][exchange].append(market_type)
+
+                    # Также добавляем биржу с минимальной ценой
+                    if min_exchange not in subscriptions_config[symbol]:
+                        subscriptions_config[symbol][min_exchange] = []
+                    if min_market_type not in subscriptions_config[symbol][min_exchange]:
+                        subscriptions_config[symbol][min_exchange].append(min_market_type)
+    
+    return subscriptions_config
+
             
-        await asyncio.sleep(3)
+# async def арбитраж(пары, мин_обьем, макс_обьем, шаг, session):
+#     global выполненые
+#     global opportunitiess
+#     global работающие_арбитражи_lock
+#     global работающие_арбитражи
+#     работа = 0
+#     for symbol, exchanges in пары.items():
 
+#         # ---- 1. Находим минимальную цену ----
+#         min_exchange, min_market_type, min_price = min(
+#             (
+#                 (exchange, market_type, data['price'])
+#                 for exchange, markets in exchanges.items()
+#                 for market_type, data in markets.items()
+#             ),
+#             key=lambda x: x[2]
+#         )
 
-                    #print(symbol)
-        #             opportunities.append(
-        #                 f"📈 Спред: {spread:.2f}% | "
-        #                 f"Купить: {min_exchange.upper()} ({min_market_type}) ${min_price:.6f} → "
-        #                 f"Продать: {exchange.upper()} ({type}) ${data.get('price'):.6f}"
-        #             )
+#         if min_price == 0:
+#             continue
 
-        #             # добавляем в список арбитражных бирж
-        #             arb_exchanges.append(
-        #                 f"- Продать: ('{symbol}', '{exchange}', '{type}') @ ${data.get('price'):.6f} (спред {spread:.2f}%)"
-        #             )
+#         opportunities = []
+#         arb_exchanges = []  # ← список бирж с арбитражом
+#         found = False
 
-        #             blacklist.append((symbol, min_exchange, min_market_type))
-        #             found = True
-        #             break
+#         # ---- 2. Проверяем арбитраж ----
+#         for exchange, types in exchanges.items():
+#             for type, data in types.items():
 
-        #     if found:
-        #         break
+#                 if (min_exchange == exchange or 
+#                     (min_market_type, type) in [('spot', 'spot'), ('futures', 'spot')]):
+#                     continue
 
-        # # ---- 3. Если есть арбитраж — собираем все цены ----
-        # if opportunities:
+#                 spread = ((data.get('price') - min_price) / min_price * 100)
 
-        #     # полный список цен по монете
-        #     full_price_list = []
-        #     for exchange, types in exchanges.items():
-        #         for type, data in types.items():
-        #             full_price_list.append(
-        #                 f", ('{symbol}', '{exchange}', '{type}')<br>${data.get('price'):.6f}"
-        #             )
+#                 if spread >= 4:
+#                     async with работающие_арбитражи_lock:
+#                         if symbol in работающие_арбитражи or symbol in blacklist:
+#                             continue
+#                         работающие_арбитражи.add(symbol)
+#                         работа += 1
 
-        #     full_price_list_text = "<br>".join(full_price_list)
-
-        #     # блок бирж с найденным арбитражем
-        #     arb_block = "<br>".join(arb_exchanges) if arb_exchanges else "—"
-
-        #     # ---- 4. Формируем итоговое сообщение ----
-        #     message = (
-        #         f"🚀 АРБИТРАЖ | {symbol}<br>"
-        #         f"🟢 Лучшая покупка: {min_exchange}, {min_market_type}) "
-        #         f"@ ${min_price:.6f}<br><br>"
-
-        #         f"📊 Найдено возможностей: {len(opportunities)}<br><br>"
-
-        #         f"{'<br>'.join(opportunities)}<br><br>"
-
-        #         f"📌 <b>Полный список цен:</b><br>{full_price_list_text}<br><br>"
-
-        #         f"📌 <b>Биржи с арбитражом:</b><br>"
-        #         f"- Купить: ('{symbol}', '{min_exchange}', '{min_market_type}') @ ${min_price:.6f}<br>"
-        #         f"{arb_block}"
-        #     )
-
-        #     await send_message_to_site(text=message)
+#                     asyncio.create_task(
+#                         арбитраж_повтор({symbol: exchanges}, мин_обьем, макс_обьем, шаг, session)
+#                     )
+#     while True:
+#         async with выполненые_lock:
+#             print(f'работающие {работа} выполнение {выполненые}\n\n')
+#             if работа == выполненые:
+#                 print('запускаемся по новой')
+#                 выполненые = 0
+#                 return
+            
+                
+            
+#         await asyncio.sleep(1.5)
 
                 
-        
-            
-
-
-
 async def арбитраж_повтор(пары, мин_обьем, макс_обьем, шаг, session):
     global выполненые
     global работающие_арбитражи_lock
     global работающие_арбитражи
-    id = None
+    
+    # Изменение: словарь для хранения ID каждой возможности
+    # Ключ - уникальный идентификатор комбинации
+    id_map = {}
+    
     start_time = time.time()
     async with светлофор_для_арбитража:
         try:
@@ -608,6 +665,8 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
 
                     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+                    #calc_start = time.perf_counter()
+                    
                     valid_futures = [
                         r for r in results 
                         if isinstance(r, tuple)
@@ -624,7 +683,7 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
                         and isinstance(r[1], dict)
                     ]
 
-                    if id == None:
+                    if not id_map:
                         async with выполненые_lock:
                             выполненые += 1
                     
@@ -633,36 +692,32 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
                     unique_exchanges = set(r[0] for r in valid_results)
                     
                     if len(unique_exchanges) < 2:
-                        #print(f"⚠️ {symbol}: только {len(valid_results)} бирж, нужно минимум 2")
-                        #print(valid_results)
-                        if id is not None:
-                            await delete_message_from_site(message_id=id)
+                        if id_map:
                             async with работающие_арбитражи_lock:
                                 работающие_арбитражи.discard(symbol)
+                            for ids in id_map.values():
+                                try:
+                                    await delete_message_from_site(message_id=ids)
+                                except Exception as e:
+                                    continue
                             return
                         else:    
                             async with работающие_арбитражи_lock:
                                 работающие_арбитражи.discard(symbol)
                             return
                     
-                    #print(f'{symbol}\n{valid_results}\n\n')
                     for exchange, order_book, funding_info, type in valid_results:
-
-
 
                         asks = order_book.get("asks") or []
                         bids = order_book.get("bids") or []
                         if not asks or not bids:
-                            #print(f'{symbol}\n{exchange}\n{type}\n{order_book}\n\n')
                             continue
 
                         funding_rate, funding_time = (0, "нет данных")
                         if isinstance(funding_info, tuple):
                             funding_rate, funding_time = funding_info
 
-                        # теперь считаем VWAP
                         for volume in range(мин_обьем, макс_обьем + 1, шаг):
-                            # ==== VWAP покупка ====
                             remaining_money = volume
                             total_spent = 0.0
                             total_coins = 0.0
@@ -681,7 +736,6 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
 
                             buy_avg = total_spent / total_coins
 
-                            # ==== VWAP продажа ====
                             remaining_coins = total_coins
                             total_revenue = 0.0
                             coins_sold = 0.0
@@ -719,26 +773,24 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
                     if not словарь_с_ценами:
                         async with работающие_арбитражи_lock:
                             работающие_арбитражи.discard(symbol)
-                        if id != None:    
-                            await delete_message_from_site(message_id=id)
+                        if id_map:
+                            for ids in id_map.values():
+                                try:    
+                                    await delete_message_from_site(message_id=ids)
+                                except Exception as e:
+                                    continue
                         return
-                    # print(f'{словарь_с_ценами}\n\n')
-                    # return
-        # except Exception as e:
-        #     print(e)
+                    
                     if словарь_с_ценами:
                         возможности = []
 
                         for symbol, volumes in словарь_с_ценами.items():
                             for volume, exchanges in volumes.items():
-                                # Собираем все торговые позиции (spot/futures) в один список
                                 all_positions = []
                                 for exchange, markets in exchanges.items():
                                     for market_type, data in markets.items():
-                                        # Для spot фандинг = 0
                                         funding = data.get("funding", 0) if market_type == "futures" else 0
                                         funding_time = data.get("get_funding") if market_type == "futures" else "нет данных"
-                                        vol = data.get('volume')
                                         all_positions.append({
                                             "exchange": exchange,
                                             "market_type": market_type,
@@ -748,45 +800,40 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
                                             "fee_taker": data["fee_taker"],
                                             "funding": funding,
                                             "funding_time": funding_time,
-                                            'volume': vol
                                         })
 
-                                # Ищем минимальный лонг
-                                min_long = min(all_positions, key=lambda x: x["buy_avg"])
-                                for pos in all_positions:
-                                    # не лонг той же биржи и типа
-                                    if pos['exchange'] == min_long['exchange'] or ((min_long['market_type'], pos['market_type']) in [('spot', 'spot'), ('futures', 'spot')]):
-                                        continue
+                                for i, pos_sell in enumerate(all_positions):
+                                    for j, pos_buy in enumerate(all_positions):
+                                        if i == j or ((pos_buy['market_type'], pos_sell['market_type']) in [('spot', 'spot'), ('futures', 'spot')]):
+                                            continue
 
-                                    комиссии = pos["fee_taker"] + min_long["fee_taker"]
-                                    funding_spread = pos["funding"] - min_long["funding"]
-                                    курсовой = ((pos["sell_avg"] - min_long["buy_avg"]) / min_long["buy_avg"]) * 100
-                                    spread_total = курсовой - комиссии + funding_spread
-                                    спред_юсдт = ((volume * 2) / 100) * spread_total
-
-                                    #print(f'{symbol} {spread_total}\n\n')
+                                        комиссии = pos_sell["fee_taker"] + pos_buy["fee_taker"]
+                                        funding_spread = pos_sell["funding"] - pos_buy["funding"]
+                                        курсовой = ((pos_sell["sell_avg"] - pos_buy["buy_avg"]) / pos_buy["buy_avg"]) * 100
+                                        spread_total = курсовой - комиссии + funding_spread
+                                        спред_юсдт = ((volume * 2) / 100) * spread_total
                                     
-                                    if spread_total >= 2:
-                                        возможности.append({
-                                            "symbol": symbol,
-                                            "ex_long": min_long["buy_avg"],
-                                            "ex_long_id": min_long["exchange"],
-                                            "ex_long_type": min_long["market_type"],
-                                            "ex_short": pos["sell_avg"],
-                                            "ex_short_id": pos["exchange"],
-                                            "ex_short_type": pos["market_type"],
-                                            "fees": комиссии,
-                                            "spread_total": spread_total,
-                                            "spread_usdt": спред_юсдт,
-                                            "funding_spread": funding_spread,
-                                            "курсовой": курсовой,
-                                            "funding_long": min_long["funding"],
-                                            "funding_long_time": min_long["funding_time"],
-                                            "funding_short": pos["funding"],
-                                            "funding_short_time": pos["funding_time"],
-                                            "volume": volume
-                                        })
-                                        #print(symbol)
+                                        if spread_total >= 4:
+                                            возможности.append({
+                                                "symbol": symbol,
+                                                "ex_long": pos_buy["buy_avg"],
+                                                "ex_long_id": pos_buy["exchange"],
+                                                "ex_long_type": pos_buy["market_type"],
+                                                "ex_short": pos_sell["sell_avg"],
+                                                "ex_short_id": pos_sell["exchange"],
+                                                "ex_short_type": pos_sell["market_type"],
+                                                "fees": комиссии,
+                                                "spread_total": spread_total,
+                                                "spread_usdt": спред_юсдт,
+                                                "funding_spread": funding_spread,
+                                                "курсовой": курсовой,
+                                                "funding_long": pos_buy["funding"],
+                                                "funding_long_time": pos_buy["funding_time"],
+                                                "funding_short": pos_sell["funding"],
+                                                "funding_short_time": pos_sell["funding_time"],
+                                                "volume": volume
+                                            })
+
 
                         # Формируем сообщение
                         if возможности:
@@ -794,260 +841,104 @@ async def арбитраж_повтор(пары, мин_обьем, макс_о
                             minutes = int(прошедшие_секунды // 60)
                             sec = int(прошедшие_секунды % 60)
                             время_жизни = f'{minutes} минут {sec} секунд'
-                            beast = max(возможности, key=lambda x: x["spread_usdt"])
 
-                            if beast.get('ex_long_type') == 'futures':
-                                msg = (
-                                    f"Валютная пара: {beast['symbol']}<br><br>"
-                                    f"Общий объем: {(beast['volume'] * 2)} USDT<br><br>"
-                                    f"Лонг {beast['ex_long_id']} ({beast['ex_long_type']}) {beast['volume']} USDT<br>"
-                                    f"По цене: {beast['ex_long']:.6f}<br>"
-                                    f"Фандинг: {beast['funding_long']:.2f}%          Время: {beast['funding_long_time']}<br><br>"
-                                )
-                            else:
-                                msg = (
-                                    f"Валютная пара: {beast['symbol']}<br><br>"
-                                    f"Общий объем: {(beast['volume'] * 2)} USDT<br><br>"
-                                    f"Лонг {beast['ex_long_id']} ({beast['ex_long_type']}) {beast['volume']} USDT<br>"
-                                    f"По цене: {beast['ex_long']:.6f}<br><br>"
-                                )
+                            # Создаём множество текущих ключей возможностей
+                            current_keys = set()
 
-                            for data in возможности:
-                                if data["volume"] == beast["volume"] and data["ex_long_id"] == beast["ex_long_id"]:
-                                    if data.get('ex_short_type') == 'futures':
-                                        msg += (
-                                            f"Шорт {data['ex_short_id']} ({data['ex_short_type']}) {beast['volume']} USDT<br>"
-                                            f"По цене: {data['ex_short']:.6f}<br>"
-                                            f"Комиссии: {data['fees']}%<br>"
-                                            f"Фандинг: {data['funding_short']:.2f}%          Время: {data['funding_short_time']}<br>"
-                                            f"Общий спред: {data['spread_total']:.2f}% / {data['spread_usdt']:.2f}$<br><br>"
-                                        )
+                            for воз in возможности:
+                                # Создаём уникальный ключ для каждой комбинации
+                                key = f"{воз['symbol']}_{воз['ex_long_id']}_{воз['ex_long_type']}_{воз['ex_short_id']}_{воз['ex_short_type']}_{воз['volume']}"
+                                current_keys.add(key)
+                                монеты = воз['volume'] / воз['ex_long']
+                                if воз.get('ex_long_type') == 'futures' and воз.get('ex_short_type') == 'futures':
+                                    msg = (
+                                        f"Валютная пара: {воз['symbol']}\n\n"
+                                        f"Лонг {воз['ex_long_id']} ({воз['ex_long_type']}) {воз['volume']} USDT {монеты}\n"
+                                        f"По цене: {воз['ex_long']:.6f}\n"
+                                        f"Фандинг: {воз['funding_long']:.2f}% Время: {воз['funding_long_time']}\n\n"
+                                        f"Шорт {воз['ex_short_id']} ({воз['ex_short_type']}) {воз['volume']} USDT {монеты}\n"
+                                        f"По цене: {воз['ex_short']:.6f}\n"
+                                        f"Фандинг: {воз['funding_short']:.2f}% Время: {воз['funding_short_time']}\n"
+                                        f"Общий спред: {воз['spread_total']:.2f}% / {воз['spread_usdt']:.2f}$ Курсовой: {воз.get('курсовой'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой'):.2f}$ Фандинговый: {воз.get('funding_spread'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('funding_spread'):.2f}$\n\n"
+                                    )
+                                else:
+                                    msg = (
+                                        f"Валютная пара: {воз['symbol']}\n\n"
+                                        f"Лонг {воз['ex_long_id']} ({воз['ex_long_type']}) {воз['volume']} USDT {монеты}\n"
+                                        f"По цене: {воз['ex_long']:.6f}\n\n"
+                                        f"Шорт {воз['ex_short_id']} ({воз['ex_short_type']}) {воз['volume']} USDT {монеты}\n"
+                                        f"По цене: {воз['ex_short']:.6f}\n"
+                                        f"Фандинг: {воз['funding_short']:.2f}% Время: {воз['funding_short_time']}\n"
+                                        f"Общий спред: {воз['spread_total']:.2f}% / {воз['spread_usdt']:.2f}$ Курсовой: {воз.get('курсовой'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой'):.2f}$ Фандинговый: {воз.get('funding_spread'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('funding_spread'):.2f}$\n\n"
+                                    )
+                                
+                                try:
+                                    if key in id_map:
+                                        # Обновляем существующее сообщение
+                                        await send_message_to_site(f"{msg}\nВремя жизни: {время_жизни}", message_id=id_map[key], exchange_long=воз['ex_long_id'], exchange_short=воз['ex_short_id'], symbol=воз['symbol'], volume=монеты, exchange_short_type=воз['ex_short_type'], exchange_long_type=воз['ex_long_type'])
+                                        
                                     else:
-                                        msg += (
-                                            f"Шорт {data['ex_short_id']} ({data['ex_short_type']}) {beast['volume']} USDT<br>"
-                                            f"По цене: {data['ex_short']:.6f}<br>"
-                                            f"Комиссии: {data['fees']}%<br>"
-                                            f"Общий спред: {data['spread_total']:.2f}% / {data['spread_usdt']:.2f}$<br><br>"
-                                        )
-
-                            try:
-                                if id is not None:
-                                    await send_message_to_site(f"{msg}<br>Время жизни: {время_жизни}", message_id=id)
-                                else:
-                                    id = await send_message_to_site(f"{msg}")
-                            except Exception as e:
-                                await asyncio.sleep(23)
-                                print(f"Ошибка в функции арбитража: {e}")
+                                        # Создаём новое сообщение и сохраняем ID
+                                        new_id = await send_message_to_site(f"{msg}\nВремя жизни: {время_жизни}", exchange_long=воз['ex_long_id'], exchange_short=воз['ex_short_id'], symbol=воз['symbol'], volume=монеты, exchange_short_type=воз['ex_short_type'], exchange_long_type=воз['ex_long_type'])
+                                        id_map[key] = new_id
+                                        
+                                except Exception as e:
+                                    print(f"Ошибка в функции арбитража: {e}")
+                                    
                             await asyncio.sleep(3)
-                        else:
-                            try:
-                                if id:
+                            
+                            # Удаляем сообщения для исчезнувших возможностей
+                            keys_to_remove = set(id_map.keys()) - current_keys
+                            for key in keys_to_remove:
+                                try:
+                                    await delete_message_from_site(message_id=id_map[key])
+                                    del id_map[key]
 
-                                    await delete_message_from_site(message_id=id)
-                                    #print(f'{symbol} {id}')
+                                except Exception as e:
+                                    print(f"Ошибка при удалении сообщения: {e}")
+                        
+                        else:
+                            # Нет возможностей - удаляем все сообщения
+                            try:
+                                if id_map:
                                     async with работающие_арбитражи_lock:
                                         работающие_арбитражи.discard(symbol)
-                                    await asyncio.sleep(3)
+                                    for ids in id_map.values():
+                                        try:
+                                            await delete_message_from_site(message_id=ids)
+                                        except Exception as e:
+                                            continue
+
                                     return
                                 else:
-                                    #print(f'{symbol}\n\n')
                                     async with работающие_арбитражи_lock:
                                         работающие_арбитражи.discard(symbol)
-                                    await asyncio.sleep(3)
                                     return
-
                             except Exception as e:
                                 print(f"Ошибка при обработке потери спреда: {e}")
-                            # async with работающие_арбитражи_lock:
-                            #     работающие_арбитражи.remove(symbol)
-                            # await asyncio.sleep(3)
-                            # return
         finally:
             async with работающие_арбитражи_lock:
                 работающие_арбитражи.discard(symbol)
-            if id:
-                await delete_message_from_site(message_id=id)
+            if id_map:
+                for ids in id_map.values():
+                    try:
+                        await delete_message_from_site(message_id=ids) 
+                    except Exception as e:
+                        continue
+                                   
+
+
+
                             
 
-                                   
-                    
-        #             if словарь_с_ценами:
-        #                 возможности = []
-        #                 #print(f"Прошла работа по монете: {symbol}")
-        #                 for symbol, volumes in словарь_с_ценами.items():
-        #                     for volume, exchanges in volumes.items():
 
-        #                         min_exchange = min(
-        #                             exchanges.items(), key=lambda x: x[1]["buy_avg"]
-        #                         )
-        #                         мин_биржа, мин_данные = min_exchange
-        #                         мин_цена = мин_данные.get("buy_avg")
-        #                         мин_тейкер = мин_данные.get("fee_taker")
-        #                         мин_мейкер = мин_данные.get("fee_maker")
-        #                         мин_фандинг = мин_данные.get("funding")
-        #                         мин_время_к_фандингy = мин_данные.get("get_funding")
-
-        #                         for биржа, дата in exchanges.items():
-        #                             if мин_биржа == биржа:
-        #                                 continue
-        #                             цена = дата.get("sell_avg")
-        #                             тейкер = дата.get("fee_taker")
-        #                             мейкер = дата.get("fee_maker")
-        #                             фандинг = дата.get("funding")
-        #                             время_к_фандингy = дата.get("get_funding")
-
-        #                             комиссии = тейкер + мин_тейкер
-        #                             # фандинг = захожу в лонг = фандинг платят шортистам
-        #                             # мин_фандинг = захожу в шорт = фандинг платять лонгистам
-
-        #                             # if фандинг <= 0 and мин_фандинг <= 0:
-        #                             #     спред_проценты = (
-        #                             #         ((цена - мин_цена) / мин_цена * 100)
-        #                             #         - комиссии
-        #                             #         + фандинг
-        #                             #     )
-
-        #                             # elif фандинг >= 0 and мин_фандинг >= 0:
-        #                             #     спред_проценты = (
-        #                             #         ((цена - мин_цена) / мин_цена * 100)
-        #                             #         - комиссии
-        #                             #         - мин_фандинг
-        #                             #     )
-
-        #                             # elif фандинг < 0 and мин_фандинг > 0:
-        #                             #     спред_проценты = (
-        #                             #         ((цена - мин_цена) / мин_цена * 100)
-        #                             #         - комиссии
-        #                             #         + фандинг
-        #                             #         - мин_фандинг
-        #                             #     )
-        #                             # elif фандинг > 0 and мин_фандинг < 0:
-        #                             #     спред_проценты = (
-        #                             #         ((цена - мин_цена) / мин_цена * 100)
-        #                             #         - комиссии
-        #                             #     )
-
-                                    
-        #                             # else:
-        #                             #     # 🛑 резервная защита — если что-то не попало в условия
-        #                             #     print(f"⚠️ Не попало ни в одно условие: фандинг={фандинг}, мин_фандинг={мин_фандинг}")
-        #                             #     спред_проценты = ((цена - мин_цена) / мин_цена * 100) - комиссии
-        #                             funding_spread = фандинг - мин_фандинг
-        #                             курсовой = ((цена - мин_цена) / мин_цена * 100)
-        #                             spread_total = ((цена - мин_цена) / мин_цена * 100) - комиссии + funding_spread
-        #                             спред_юсдт = ((volume * 2) / 100) * spread_total
-        #                             #спред_юсдт = ((volume * 2) / 100) * спред_проценты
-        #                             if spread_total >= 1.2:
-        #                                 возможности.append(
-        #                                     {
-        #                                         "symbol": symbol,
-        #                                         "ex_long": мин_цена,
-        #                                         "ex_long_id": мин_биржа,
-        #                                         "ex_short": цена,
-        #                                         "ex_short_id": биржа,
-        #                                         "fees": комиссии,
-        #                                         "spread_total": spread_total,
-        #                                         "spread_usdt": спред_юсдт,
-        #                                         'funding_spread': funding_spread,
-        #                                         'курсовой': курсовой,
-        #                                         "funding_long": мин_фандинг,
-        #                                         "funding_long_time": мин_время_к_фандингy,
-        #                                         "funding_short": фандинг,
-        #                                         "funding_short_time": время_к_фандингy,
-        #                                         "volume": volume,
-        #                                     }
-        #                                 )
-                                        
-
-        #                 if возможности:
-
-
-        #                     прошедшие_секунды = time.time() - start_time
-        #                     minutes = int(прошедшие_секунды // 60)
-        #                     sec = int(прошедшие_секунды % 60)
-        #                     время_жизни = f'{minutes} минут {sec} секунд'
-        #                     beast = max(возможности, key=lambda x: x["spread_usdt"])
-
-        #                     msg = (
-        #                         f"Валютная пара: {beast.get('symbol')}<br><br>"
-        #                         f"Общий объем: {(beast.get('volume') * 2)} USDT<br><br>"
-        #                         f"Лонг {beast.get('ex_long_id')} {beast.get('volume')} USDT<br>"
-        #                         f"По цене: {beast.get('ex_long'):.6f}<br>"
-        #                         f"Фандинг: {beast.get('funding_long'):.2f}%          Время: {beast.get('funding_long_time')}<br><br>"
-        #                     )
-
-        #                     for data in возможности:
-        #                         if data.get("volume") == beast.get("volume") and data.get(
-        #                             "ex_long_id"
-        #                         ) == beast.get("ex_long_id"):
-        #                             msg += (
-        #                                 f"Шорт {data.get('ex_short_id')} {beast.get('volume')} USDT<br>"
-        #                                 f"По цене: {data.get('ex_short'):.6f}<br>"
-        #                                 f"Комиссии: {data.get('fees')}%<br>"
-        #                                 f"Фандинг: {data.get('funding_short'):.2f}%          Время: {data.get('funding_short_time')}<br>"
-        #                                 #f"Общий спред: {data.get('spread_total'):.2f}% / {data.get('spread_usdt'):.2f}$ / {(data.get('volume') * 2)}$<br><br>"
-        #                                 f"Общий спред: {data.get('spread_total'):.2f}% / {(data.get('volume') * 2) / 100 * data.get('spread_total'):.2f}$          Курсовой: {data.get('курсовой'):.2f}% / {(data.get('volume') * 2) / 100 * data.get('курсовой'):.2f}$          Фандинговый: {data.get('funding_spread')}% / {(data.get('volume') * 2) / 100 * data.get('funding_spread'):.2f}$<br><br>"
-        #                             )
-
-        #                     try:
-        #                         if id is not None:
-        #                             await send_message_to_site(f"{msg}<br>Время жизни: {время_жизни}", message_id=id)
-
-                                    
-        #                         else:
-        #                             id = await send_message_to_site(f"{msg}")
-
-
-
-        #                     except Exception as e:
-        #                         await asyncio.sleep(23)
-        #                         print(f"Ошибка в функции арбитража: {e}")
-        #                     await asyncio.sleep(3)
-        #                     continue
-
-        #                 else:
-
-        #                     try:
-        #                         if id:
-
-        #                             await delete_message_from_site(message_id=id)
-        #                             #print(f'{symbol} {id}')
-        #                             async with работающие_арбитражи_lock:
-        #                                 работающие_арбитражи.discard(symbol)
-        #                             await asyncio.sleep(3)
-        #                             return
-        #                         else:
-                                    
-        #                             async with работающие_арбитражи_lock:
-        #                                 работающие_арбитражи.discard(symbol)
-        #                             await asyncio.sleep(3)
-        #                             return
-
-        #                     except Exception as e:
-        #                         print(f"Ошибка при обработке потери спреда: {e}")
-        #                     # async with работающие_арбитражи_lock:
-        #                     #     работающие_арбитражи.remove(symbol)
-        #                     # await asyncio.sleep(3)
-        #                     # return
-        # finally:
-        #     async with работающие_арбитражи_lock:
-        #         работающие_арбитражи.discard(symbol)
-        #     if id:
-        #         await delete_message_from_site(message_id=id)
-
-
-async def counter():
-    while True:
-        async with работающие_арбитражи_lock:
-            print(len(работающие_арбитражи))
-        await asyncio.sleep(5)
 
 async def арбитраж_бот(session):
     while True:
         data = await apishechka()
-        await арбитраж(data, 100, 250, 25, session)
+        await арбитраж(data, 60, 60, 25, session)
         #print('обнова')
-        await asyncio.sleep(5)
+        await asyncio.sleep(3)
         
         
         
