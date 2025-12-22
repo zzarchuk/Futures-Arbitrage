@@ -1,11 +1,8 @@
-from state import orderbook, lock
+from переменные import orderbook, lock
 import asyncio
 from collections import defaultdict
-import time
 import copy
-#from web import send_message_to_site, app, delete_message_from_site
-from typing import Dict, List
-#from web import update_spread
+from typing import Dict
 
 def filter_two_exchanges(
     data: Dict,
@@ -75,11 +72,11 @@ async def схождения(exchange_long, exchange_short, symbol_param, volume
                         remaining_coins_to_buy = volume
                         total_spent = 0.0
 
-                        for price, available in asks:
+                        for price in asks:
                             if remaining_coins_to_buy <= 0:
                                 break
-                            actual_coins = min(float(available), remaining_coins_to_buy)
-                            total_spent += actual_coins * float(price)
+                            actual_coins = min(float(price[1]), remaining_coins_to_buy)
+                            total_spent += actual_coins * float(price[0])
                             remaining_coins_to_buy -= actual_coins
 
                         if remaining_coins_to_buy > 0:
@@ -92,11 +89,11 @@ async def схождения(exchange_long, exchange_short, symbol_param, volume
                         remaining_coins_to_sell = volume
                         total_revenue = 0.0
 
-                        for price, available in bids:
+                        for price in bids:
                             if remaining_coins_to_sell <= 0:
                                 break
-                            actual_coins = min(float(available), remaining_coins_to_sell)
-                            total_revenue += actual_coins * float(price)
+                            actual_coins = min(float(price[1]), remaining_coins_to_sell)
+                            total_revenue += actual_coins * float(price[0])
                             remaining_coins_to_sell -= actual_coins
 
                         if remaining_coins_to_sell > 0:
@@ -199,6 +196,7 @@ async def схождения(exchange_long, exchange_short, symbol_param, volume
                 net_pnl = total_pnl - fee_cost + funding_spread
                 
                 pnl_percent_all = (net_pnl / ((long_price + short_price) * volume)) * 100
+                now = spread + pnl_percent_all
                 
                 msg = (
                     f'Схождения {symbol}\n\n'
@@ -206,8 +204,8 @@ async def схождения(exchange_long, exchange_short, symbol_param, volume
                     f'PNL: {pnl_long:.2f} USDT\n\n'
                     f'Закрываем шорт на бирже {buy_data["ex_for_buy"]} по цене {buy_data["price_buy"]:.4f}\n'
                     f'PNL: {pnl_short:.2f} USDT\n\n'
-                    f'Чистый PNL с учетом фандингов {net_pnl:.2f} USDT / {pnl_percent_all:.2f}%\n'
-                    f'Изначальный спред при входе {spread:.2f}% сейчас {pnl_percent_all:.2f}%'
+                    #f'Чистый PNL с учетом фандингов {net_pnl:.2f} USDT / {pnl_percent_all:.2f}%\n'
+                    f'Изначальный спред при входе {spread:.2f}% сейчас {now:.2f}%'
                 )
                 
                 print(f'📨 Отправляем сообщение:\n{msg}\n')

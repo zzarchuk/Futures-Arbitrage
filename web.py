@@ -69,14 +69,16 @@ from fastapi.responses import HTMLResponse
 from схождения import схождения
 from pydantic import BaseModel
 from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 import asyncio
-from state import orderbook
+from переменные import orderbook
 import uuid
 
 app = FastAPI()
 clients = set()
 lock = asyncio.Lock()
 
+app.mount("/static", StaticFiles(directory="templates"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def main_page():

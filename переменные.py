@@ -6,3 +6,7 @@ orderbook = defaultdict(
 )
 
 lock = asyncio.Lock()
+
+subscriptions_lock = asyncio.Lock()
+
+subscriptions_config = {}

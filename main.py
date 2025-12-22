@@ -1,11 +1,11 @@
-import random
+
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "websocket_proto"))
 
 import tracemalloc
-from state import orderbook, lock
+from переменные import orderbook, lock, subscriptions_config, subscriptions_lock
 import asyncio
 import aiohttp
 import websockets
@@ -13,13 +13,11 @@ import json
 import gzip
 from collections import defaultdict
 import time
-from typing import Dict, Set, List
+from typing import Set
 import copy
 from binascii import crc32
-from decimal import Decimal
 import ctypes
-#from dict_with_spread import арбитраж_бот
-from filter_with_spot import mainn
+from filter import mainn
 from web import send_message_to_site, app, delete_message_from_site
 import uvicorn
 
@@ -45,15 +43,12 @@ async def monitor_memory():
             print(stat)
             
             
-#lock = asyncio.Lock()
-# orderbook = defaultdict(
-#     lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-# )
 
 
-subscriptions_lock = asyncio.Lock()
-#subscriptions_config = {'BTCUSDT': {'okx': ['spot', 'futures']}, 'ETHUSDT': {'okx': ['spot', 'futures']}, 'BNBUSDT': {'okx': ['spot', 'futures']}}
-subscriptions_config = {}
+
+# subscriptions_lock = asyncio.Lock()
+
+# subscriptions_config = {}
 
 
 
@@ -2700,13 +2695,13 @@ async def order():
 
 async def арбитраж_повтор(мин_обьем, макс_обьем, шаг):
     last_update_time = {}
-    update_interval = 30  # обновлять каждые 10 секунд
+    update_interval = 1  # обновлять каждые 10 секунд
     id_map = {}
     
     start_time = time.time()
     try:
         while True:
-            #print('начало')
+            
             await asyncio.sleep(0.2)  # УВЕЛИЧИЛ с 0.2 до 1 секунды
             
             if not orderbook.keys():
@@ -2719,7 +2714,7 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                     #data = {k: v.copy() for k, v in orderbook.items()}
                     data = copy.deepcopy(orderbook)
                     #print('вышли с лока')
-            
+            #print('начало')
             # Собираем ВСЕ возможности со всех символов
             все_возможности = []
             
@@ -2824,43 +2819,55 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                                 for j, pos_buy in enumerate(all_positions):
                                     if i == j or ((pos_buy['market_type'], pos_sell['market_type']) in [('spot', 'spot'), ('futures', 'spot')]):
                                         continue
-
-
-                                    buy_slippage = ((pos_buy["buy_avg"] - pos_buy["best_ask"]) / pos_buy["best_ask"]) * 100
-                                    sell_slippage = ((pos_sell["best_bid"] - pos_sell["sell_avg"]) / pos_sell["best_bid"]) * 100
                                     
-                                    total_slippage = buy_slippage + sell_slippage
+
+                                    exit_long = ((pos_buy["sell_avg"] - pos_buy["buy_avg"]) / pos_buy["buy_avg"]) * 100
+                                    exit_short = ((pos_sell["sell_avg"] - pos_sell["buy_avg"]) / pos_sell["sell_avg"]) * 100
+                                    
+                                    if exit_long > 0 or exit_short > 0:
+                                        print('sdf')
+                                    total = exit_long + exit_short
+                                    #total = 0
+
 
 
                                     комиссии = pos_sell["fee_taker"] + pos_buy["fee_taker"]
                                     funding_spread = pos_sell["funding"] - pos_buy["funding"]
+                                    
+                                    
                                     курсовой = ((pos_sell["sell_avg"] - pos_buy["buy_avg"]) / pos_buy["buy_avg"]) * 100
-                                    spread_total = курсовой - комиссии + funding_spread
+
+                                            
+                                    spread_total = курсовой - комиссии + funding_spread + total
+                                    spred_without_fund = курсовой - комиссии + total
                                     спред_юсдт = ((volume * 2) / 100) * spread_total
                                 
                                     #if spread_total >= 9:
-                                    if spread_total >= 2:
+                                    if spred_without_fund >= 2: #or spread_total >= 2: 
                                         все_возможности.append({
                                             "symbol": symbol,
-                                            'slippage_for_long': sell_slippage,
+                                            'slippage_for_long': exit_long,
                                             "ex_long": pos_buy["buy_avg"],
+                                            'ex_long_exit': pos_buy['sell_avg'],
                                             "ex_long_id": pos_buy["exchange"],
                                             "ex_long_type": pos_buy["market_type"],
                                             "ex_short": pos_sell["sell_avg"],
+                                            'ex_short_exit': pos_buy['buy_avg'],
                                             "ex_short_id": pos_sell["exchange"],
                                             "ex_short_type": pos_sell["market_type"],
-                                            'slippage_for_short': buy_slippage,
+                                            'slippage_for_short': exit_short,
                                             "fees": комиссии,
                                             "spread_total": spread_total,
                                             "spread_usdt": спред_юсдт,
                                             "funding_spread": funding_spread,
                                             "курсовой": курсовой,
+                                            'курсовой_с_тоталом': spred_without_fund,
                                             "funding_long": pos_buy["funding"],
                                             "funding_long_time": pos_buy["funding_time"],
                                             "funding_short": pos_sell["funding"],
                                             "funding_short_time": pos_sell["funding_time"],
                                             "volume": volume,
-                                            'total_slippage': total_slippage
+                                            'total_slippage': total
                                         })
             лучшие_возможности = {}
 
@@ -2902,15 +2909,16 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                         f"Лонг {воз['ex_long_id']} ({воз['ex_long_type']}) {воз['volume']} USDT {монеты:.4f}\n"
                         f"По цене: {воз['ex_long']:.6f}\n"
                         f"Фандинг: {воз['funding_long']:.2f}% Время: {воз['funding_long_time']}\n"
-                        f'Slippage {воз['slippage_for_long']}\n\n'
+                        f'Выход {воз['slippage_for_long']:.2f} / Цена {воз['ex_long_exit']:.2f}\n\n'
                         f"Шорт {воз['ex_short_id']} ({воз['ex_short_type']}) {воз['volume']} USDT {монеты:.4f}\n"
                         f"По цене: {воз['ex_short']:.6f}\n"
                         f"Фандинг: {воз['funding_short']:.2f}% Время: {воз['funding_short_time']}\n"
                         f"Общий спред: {воз['spread_total']:.2f}% / {воз['spread_usdt']:.2f}$ "
                         f"Курсовой: {воз.get('курсовой'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой'):.2f}$ "
+                        f"Курсовой с тоталом: {воз.get('курсовой_с_тоталом'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой_с_тоталом'):.2f}$ "
                         f"Фандинговый: {воз.get('funding_spread'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('funding_spread'):.2f}$\n"
-                        f'Slippage {воз['slippage_for_short']}\n\n'
-                        f'TOTAL SLIPPAGE {воз['total_slippage']}'
+                        f'Выход {воз['slippage_for_short']:.2f} / Цена {воз['ex_short_exit']:.2f}\n\n'
+                        f'TOTAL Выход {воз['total_slippage']:.2f}'
                         #f"Время жизни: {время_жизни}"
                         
                     )
@@ -2919,15 +2927,16 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                         f"Валютная пара: {воз['symbol']}\n\n"
                         f"Лонг {воз['ex_long_id']} ({воз['ex_long_type']}) {воз['volume']} USDT {монеты:.4f}\n"
                         f"По цене: {воз['ex_long']:.6f}\n"
-                        f'Slippage {воз['slippage_for_long']}\n\n'
+                        f'Выход {воз['slippage_for_long']:.2f} / Цена {воз['ex_long_exit']:.2f}\n\n'
                         f"Шорт {воз['ex_short_id']} ({воз['ex_short_type']}) {воз['volume']} USDT {монеты:.4f}\n"
                         f"По цене: {воз['ex_short']:.6f}\n"
                         f"Фандинг: {воз['funding_short']:.2f}% Время: {воз['funding_short_time']}\n"
                         f"Общий спред: {воз['spread_total']:.2f}% / {воз['spread_usdt']:.2f}$ "
                         f"Курсовой: {воз.get('курсовой'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой'):.2f}$ "
+                        f"Курсовой с тоталом: {воз.get('курсовой_с_тоталом'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой_с_тоталом'):.2f}$ "
                         f"Фандинговый: {воз.get('funding_spread'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('funding_spread'):.2f}$\n"
-                        f'Slippage {воз['slippage_for_short']}\n\n'
-                        f'TOTAL SLIPPAGE {воз['total_slippage']}'
+                        f'Выход {воз['slippage_for_short']:.2f} / Цена {воз['ex_short_exit']:.2f}\n\n'
+                        f'TOTAL Выход {воз['total_slippage']:.2f}'
                         #f"Время жизни: {время_жизни}"
                     )
                 
@@ -3013,7 +3022,7 @@ async def стакан():
     
     # Запускаем все задачи
     tasks = [
-        asyncio.create_task(арбитраж_повтор(300, 2000, 100)),
+        asyncio.create_task(арбитраж_повтор(60, 61, 50)),
         #asyncio.create_task(on_startup()),
         asyncio.create_task(update_data()),
         # Мониторинг изменений конфига

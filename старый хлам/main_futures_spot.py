@@ -1,6 +1,6 @@
 from web import send_message_to_site, app, delete_message_from_site
 import uvicorn
-from filter_with_spot import apishechka
+from filter import apishechka
 import asyncio
 import aiohttp
 from collections import defaultdict
