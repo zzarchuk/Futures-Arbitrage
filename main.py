@@ -4,6 +4,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "websocket_proto"))
 
+from sql import Database
 import tracemalloc
 from переменные import orderbook, lock, subscriptions_config, subscriptions_lock
 import asyncio
@@ -18,7 +19,7 @@ import copy
 from binascii import crc32
 import ctypes
 from filter import mainn
-from web import send_message_to_site, app, delete_message_from_site
+from web import message_to_site, app
 import uvicorn
 
 import PushDataV3ApiWrapper_pb2  # type: ignore
@@ -2692,17 +2693,13 @@ async def order():
         except Exception as e:
             print(f"❌ Save error: {e}")
 
+async def арбитраж_повтор(мин_обьем, макс_обьем, шаг, database):
+    for_delete = set()
 
-async def арбитраж_повтор(мин_обьем, макс_обьем, шаг):
-    last_update_time = {}
-    update_interval = 1  # обновлять каждые 10 секунд
-    id_map = {}
-    
-    start_time = time.time()
     try:
         while True:
-            
-            await asyncio.sleep(0.2)  # УВЕЛИЧИЛ с 0.2 до 1 секунды
+            for_send = set()
+            await asyncio.sleep(1)  # УВЕЛИЧИЛ с 0.2 до 1 секунды
             
             if not orderbook.keys():
                 await asyncio.sleep(1)
@@ -2716,9 +2713,11 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                     #print('вышли с лока')
             #print('начало')
             # Собираем ВСЕ возможности со всех символов
-            все_возможности = []
+            все_возможности = defaultdict(list)
             
             for symbol, exchanges in data.items():
+                if symbol == 'VOOIUSDT':
+                    print(exchanges)
                 словарь_с_ценами = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
                 
                 for exchange, types in exchanges.items():
@@ -2795,6 +2794,7 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                 
                 # Анализируем возможности для текущего символа
                 if словарь_с_ценами:
+                    
                     for symbol, volumes in словарь_с_ценами.items():
                         for volume, exchanges in volumes.items():
                             all_positions = []
@@ -2844,165 +2844,50 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                                 
                                     #if spread_total >= 9:
                                     if spred_without_fund >= 2: #or spread_total >= 2: 
-                                        все_возможности.append({
-                                            "symbol": symbol,
-                                            'slippage_for_long': exit_long,
-                                            "ex_long": pos_buy["buy_avg"],
+                                        for_send.add(symbol)
+                                        await database.insert_data(pos_buy["exchange"], pos_buy["market_type"], pos_sell["exchange"], pos_sell["market_type"], spred_without_fund, symbol)
+                                        
+
+
+                                        все_возможности[symbol].append({
+                                            'slippage_for_long': exit_long, 
+                                            "long_price": round(pos_buy["buy_avg"], 2), #
                                             'ex_long_exit': pos_buy['sell_avg'],
-                                            "ex_long_id": pos_buy["exchange"],
-                                            "ex_long_type": pos_buy["market_type"],
-                                            "ex_short": pos_sell["sell_avg"],
+                                            "exchange_long": pos_buy["exchange"], #
+                                            "long_type": pos_buy["market_type"], #
+                                            "short_price": round(pos_sell["sell_avg"], 2),#
                                             'ex_short_exit': pos_buy['buy_avg'],
-                                            "ex_short_id": pos_sell["exchange"],
-                                            "ex_short_type": pos_sell["market_type"],
+                                            "exchange_short": pos_sell["exchange"],#
+                                            "short_type": pos_sell["market_type"],#
                                             'slippage_for_short': exit_short,
                                             "fees": комиссии,
                                             "spread_total": spread_total,
                                             "spread_usdt": спред_юсдт,
-                                            "funding_spread": funding_spread,
-                                            "курсовой": курсовой,
-                                            'курсовой_с_тоталом': spred_without_fund,
+                                            "funding_spread": round(funding_spread, 2),#
+                                            "курсовой": round(курсовой, 2),#
+                                            'курсовой_с_тоталом': round(spred_without_fund, 2),#
                                             "funding_long": pos_buy["funding"],
                                             "funding_long_time": pos_buy["funding_time"],
                                             "funding_short": pos_sell["funding"],
                                             "funding_short_time": pos_sell["funding_time"],
-                                            "volume": volume,
+                                            "volume": round((volume / pos_buy["buy_avg"]), 4),#
                                             'total_slippage': total
                                         })
-            лучшие_возможности = {}
-
-            for воз in все_возможности:
-                # Ключ уникальный для пары бирж и их типов
-                key = (
-                    воз['ex_long_id'],
-                    воз['ex_long_type'],
-                    воз['ex_short_id'],
-                    воз['ex_short_type']
-                )
-
-                # Если ключа нет или текущий spread_usdt больше
-                if key not in лучшие_возможности or воз['spread_usdt'] > лучшие_возможности[key]['spread_usdt']:
-                    лучшие_возможности[key] = воз
-
-            # Получаем список лучших возможностей
-            все_возможности = list(лучшие_возможности.values())
+            delete = for_delete - for_send
+            for_delete = for_send.copy()
             
-            # Обрабатываем все возможности ОДИН РАЗ за итерацию
-            прошедшие_секунды = time.time() - start_time
-            minutes = int(прошедшие_секунды // 60)
-            sec = int(прошедшие_секунды % 60)
-            время_жизни = f'{minutes} минут {sec} секунд'
-            
-            current_keys = set()
-            
-            for воз in все_возможности:
-                key = f"{воз['symbol']}_{воз['ex_long_id']}_{воз['ex_long_type']}_{воз['ex_short_id']}_{воз['ex_short_type']}_{воз['volume']}"
-                current_keys.add(key)
-                монеты = воз['volume'] / воз['ex_long']
-                
-                now = time.time()
-                
-                # Формируем сообщение
-                if воз.get('ex_long_type') == 'futures' and воз.get('ex_short_type') == 'futures':
-                    msg = (
-                        f"Валютная пара: {воз['symbol']}\n\n"
-                        f"Лонг {воз['ex_long_id']} ({воз['ex_long_type']}) {воз['volume']} USDT {монеты:.4f}\n"
-                        f"По цене: {воз['ex_long']:.6f}\n"
-                        f"Фандинг: {воз['funding_long']:.2f}% Время: {воз['funding_long_time']}\n"
-                        f'Выход {воз['slippage_for_long']:.2f} / Цена {воз['ex_long_exit']:.2f}\n\n'
-                        f"Шорт {воз['ex_short_id']} ({воз['ex_short_type']}) {воз['volume']} USDT {монеты:.4f}\n"
-                        f"По цене: {воз['ex_short']:.6f}\n"
-                        f"Фандинг: {воз['funding_short']:.2f}% Время: {воз['funding_short_time']}\n"
-                        f"Общий спред: {воз['spread_total']:.2f}% / {воз['spread_usdt']:.2f}$ "
-                        f"Курсовой: {воз.get('курсовой'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой'):.2f}$ "
-                        f"Курсовой с тоталом: {воз.get('курсовой_с_тоталом'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой_с_тоталом'):.2f}$ "
-                        f"Фандинговый: {воз.get('funding_spread'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('funding_spread'):.2f}$\n"
-                        f'Выход {воз['slippage_for_short']:.2f} / Цена {воз['ex_short_exit']:.2f}\n\n'
-                        f'TOTAL Выход {воз['total_slippage']:.2f}'
-                        #f"Время жизни: {время_жизни}"
-                        
-                    )
-                else:
-                    msg = (
-                        f"Валютная пара: {воз['symbol']}\n\n"
-                        f"Лонг {воз['ex_long_id']} ({воз['ex_long_type']}) {воз['volume']} USDT {монеты:.4f}\n"
-                        f"По цене: {воз['ex_long']:.6f}\n"
-                        f'Выход {воз['slippage_for_long']:.2f} / Цена {воз['ex_long_exit']:.2f}\n\n'
-                        f"Шорт {воз['ex_short_id']} ({воз['ex_short_type']}) {воз['volume']} USDT {монеты:.4f}\n"
-                        f"По цене: {воз['ex_short']:.6f}\n"
-                        f"Фандинг: {воз['funding_short']:.2f}% Время: {воз['funding_short_time']}\n"
-                        f"Общий спред: {воз['spread_total']:.2f}% / {воз['spread_usdt']:.2f}$ "
-                        f"Курсовой: {воз.get('курсовой'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой'):.2f}$ "
-                        f"Курсовой с тоталом: {воз.get('курсовой_с_тоталом'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('курсовой_с_тоталом'):.2f}$ "
-                        f"Фандинговый: {воз.get('funding_spread'):.2f}% / {(воз.get('volume') * 2) / 100 * воз.get('funding_spread'):.2f}$\n"
-                        f'Выход {воз['slippage_for_short']:.2f} / Цена {воз['ex_short_exit']:.2f}\n\n'
-                        f'TOTAL Выход {воз['total_slippage']:.2f}'
-                        #f"Время жизни: {время_жизни}"
-                    )
-                
-                try:
-
-                    # Если сообщение существует И прошло достаточно времени - обновляем
-                    if key in id_map:
-                        if now - last_update_time.get(key, 0) >= update_interval:
-                            #print(msg)
-                            
-                            await send_message_to_site(
-                                msg, 
-                                long_price=воз['ex_long'],
-                                short_price=воз['ex_short'],
-                                spread=воз['курсовой'],
-                                message_id=id_map[key],
-                                exchange_long=воз['ex_long_id'],
-                                exchange_short=воз['ex_short_id'],
-                                symbol=воз['symbol'],
-                                volume=монеты,
-                                exchange_short_type=воз['ex_short_type'],
-                                exchange_long_type=воз['ex_long_type']
-                            )
-                            last_update_time[key] = now
-                    else:
-                        #print(msg)
-                        #new_id = random.randint(1, 23423423)
-
-                        # Создаём новое сообщение
-                        new_id = await send_message_to_site(
-                            msg,
-                            long_price=воз['ex_long'],
-                            short_price=воз['ex_short'],
-                            spread=воз['курсовой'],
-                            exchange_long=воз['ex_long_id'],
-                            exchange_short=воз['ex_short_id'],
-                            symbol=воз['symbol'],
-                            volume=монеты,
-                            exchange_short_type=воз['ex_short_type'],
-                            exchange_long_type=воз['ex_long_type']
-                        )
-                        id_map[key] = new_id
-                        last_update_time[key] = now
-                        
-                except Exception as e:
-                    print(f"Ошибка в функции арбитража: {e}")
-            
-            # Удаляем исчезнувшие возможности
-            keys_to_remove = set(id_map.keys()) - current_keys
-            for key in keys_to_remove:
-                try:
-                    #if now - last_update_time.get(key, 0) >= update_interval:
-                    await delete_message_from_site(message_id=id_map[key])
-                    del id_map[key]
-                    if key in last_update_time:
-                        del last_update_time[key]
-                except Exception as e:
-                    print(f"Ошибка при удалении сообщения: {e}")
-                    
-    finally:
-        # Очистка при завершении
-        for msg_id in id_map.values():
             try:
-                await delete_message_from_site(message_id=msg_id)
-            except:
-                pass
+                for symbol_for_send, data_for_send in все_возможности.items():
+                    await message_to_site(symbol_for_send, data_for_send)
+                for symbol_for_delete in delete:
+                    await message_to_site(symbol_for_delete)
+            except Exception as e:
+                print(f'Ошибка в отправление/удаления сообщения в функции арбитража{e}')
+            
+            
+            
+    except Exception as e:
+        print(f'Ошибка в функции арбитража {e}')
 
 async def стакан():
     # Создаём менеджер подписок
@@ -3018,11 +2903,14 @@ async def стакан():
     bitget = BitgetDynamicWS(manager)
     bybit_spot = BybitDynamicWS(manager, market="spot", depth=50)
     bybit_linear = BybitDynamicWS(manager, market="linear", depth=50)
+    
+    database = Database()
+    await database.connect()
 
     
     # Запускаем все задачи
     tasks = [
-        asyncio.create_task(арбитраж_повтор(60, 61, 50)),
+        asyncio.create_task(арбитраж_повтор(60, 61, 50, database)),
         #asyncio.create_task(on_startup()),
         asyncio.create_task(update_data()),
         # Мониторинг изменений конфига

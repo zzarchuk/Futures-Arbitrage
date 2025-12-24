@@ -1,89 +1,112 @@
-# from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-# from fastapi.responses import HTMLResponse
-# from pathlib import Path
-# import asyncio
-# import uuid
-
-# app = FastAPI()
-# clients = set()
-# lock = asyncio.Lock()
-
-# @app.get("/", response_class=HTMLResponse)
-# async def main_page():
-#     html_path = Path(__file__).parent / "templates" / "index.html"
-#     return html_path.read_text(encoding="utf-8")
-
-
-# @app.websocket("/ws")
-# async def websocket_endpoint(ws: WebSocket):
-#     await ws.accept()
-#     async with lock:
-#         clients.add(ws)
-#     try:
-#         while True:
-#             await ws.receive_text()
-#     except WebSocketDisconnect:
-#         async with lock:
-#             clients.remove(ws)
-
-
-# async def send_message_to_site(text: str, message_id: str | None = None):
-#     """
-#     Отправка или обновление сообщения на сайте.
-#     Если message_id не указан — создаётся новое сообщение.
-#     Если указан — обновляется существующее.
-#     """
-#     if message_id is None:
-#         message_id = str(uuid.uuid4())
-#         action = "create"
-#     else:
-#         action = "update"
-
-#     data = {"action": action, "id": message_id, "text": text}
-
-#     async with lock:
-#         for ws in list(clients):
-#             try:
-#                 await ws.send_json(data)
-#             except:
-#                 clients.remove(ws)
-
-#     return message_id  # возвращаем ID, чтобы потом обновить это сообщение
-
-
-# async def delete_message_from_site(message_id: str):
-#     """
-#     Удаляет сообщение с указанным message_id на всех подключённых клиентах.
-#     """
-#     data = {"action": "delete", "id": message_id}
-
-#     async with lock:
-#         for ws in list(clients):
-#             try:
-#                 await ws.send_json(data)
-#             except:
-#                 clients.remove(ws)
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from схождения import схождения
 from pydantic import BaseModel
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
 import asyncio
-from переменные import orderbook
 import uuid
+from fastapi.responses import FileResponse
+import random
+
+stop_chart = False
+stop_positions = False
 
 app = FastAPI()
-clients = set()
-lock = asyncio.Lock()
 
-app.mount("/static", StaticFiles(directory="templates"), name="static")
+clients = set()
+clients_chart = {}
+clients_position = {}
+
+lock = asyncio.Lock()
+lock_chart = asyncio.Lock()
+lock_position = asyncio.Lock()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # создаём фоновые задачи
+    task1 = asyncio.create_task(send_chart_data())
+    task2 = asyncio.create_task(схождение_покупка())
+
+    try:
+        yield  # приложение запускается
+    finally:
+        # останавливаем задачи при завершении приложения
+        task1.cancel()
+        task2.cancel()
+        try:
+            await task1
+        except asyncio.CancelledError:
+            pass
+        try:
+            await task2
+        except asyncio.CancelledError:
+            pass
+
+app.router.lifespan_context = lifespan
+
+@app.get("/position.css")
+async def position_css():
+    file_path = Path(__file__).parent / "static" / "position.css"
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "no-store"}
+    )
+
+@app.get("/script.js")
+async def script():
+    file_path = Path(__file__).parent / "static" / "script.js"
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "no-store"}
+    )
+    
+@app.get("/style.css")
+async def styles():
+    file_path = Path(__file__).parent / "static" / "style.css"
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "no-store"}
+    )
+ 
+@app.get("/chart.css")
+async def styles_chart():
+    file_path = Path(__file__).parent / "static" / "chart.css"
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "no-store"}
+    )
+
+@app.get("/chart.js")
+async def java_chart():
+    file_path = Path(__file__).parent / "static" / "chart.js"
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "no-store"}
+    )
+
+@app.get("/position.js")
+async def java_position():
+    file_path = Path(__file__).parent / "static" / "position.js"
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "no-store"}
+    )
+
+
+
 
 @app.get("/", response_class=HTMLResponse)
 async def main_page():
     html_path = Path(__file__).parent / "templates" / "index.html"
     return html_path.read_text(encoding="utf-8")
+
+
+
+
+
+
+
 
 
 @app.websocket("/ws")
@@ -98,103 +121,139 @@ async def websocket_endpoint(ws: WebSocket):
         async with lock:
             clients.remove(ws)
 
+@app.websocket("/ws_chart")
+async def websocket_endpoint_chart(ws: WebSocket):
+    await ws.accept()
+    symbol = ws.query_params.get("symbol")
+    if symbol not in clients_chart:
+        clients_chart[symbol] = set()
+    print(symbol)
+    async with lock_chart:
+        clients_chart[symbol].add(ws)
+    
+    try:
+        while True:
+            # просто ждём от клиента, чтобы соединение держалось
+            await asyncio.sleep(0.2)
+    except WebSocketDisconnect:
+        async with lock_chart:
+            del clients_chart[symbol]
+
+
+
+@app.websocket("/ws_position")
+async def websocket_endpoint_position(ws: WebSocket):
+    
+    await ws.accept()
+    
+    symbol = ws.query_params.get("symbol")
+    long = ws.query_params.get("long")
+    type_long = ws.query_params.get("type_long")
+    short = ws.query_params.get("short")
+    type_short = ws.query_params.get("type_short")
+    quant_coins = ws.query_params.get("quant_coins")
+    
+    data = (symbol, long, type_long, short, type_short, quant_coins)
+    print(data)
+    
+    
+    if data not in clients_position:
+        clients_position[data] = set()
+        
+        
+    async with lock_position:
+        clients_position[data].add(ws)
+            
+        
+    try:
+        while True:
+            await asyncio.sleep(0.2)
+    except WebSocketDisconnect:
+        async with lock_position:
+            clients_position[data].discard(ws)  # ← удаляем только конкретный ws
+            if not clients_position[data]:  # если set пустой
+                del clients_position[data] 
+            
 
 # ----- кнопка открытия сделки -----
-class TradeRequest(BaseModel):
-    exchange_long: dict
-    exchange_short: dict
-    symbol: str
-    volume: float
-    long_price: float
-    short_price: float
-    spread: float
 
 
+@app.get("/chart", response_class=HTMLResponse)
+async def chart_page(symbol):
+    #print(symbol)
+    html_path = Path(__file__).parent / "templates" / "chart.html"
+    return html_path.read_text(encoding="utf-8")
 
-@app.post("/open_trade")
-async def open_trade(req: TradeRequest):
-    try:
-        # здесь вызываешь свой арбитражный код, например:
-        asyncio.create_task(схождения(req.exchange_long, req.exchange_short, req.symbol, req.volume, req.long_price, req.short_price, req.spread))
-        #print(f"Данные:\n\n\n{req.exchange_long}\n{req.exchange_short}\n{req.symbol}\n{req.volume}\n{req.long_price}\n{req.short_price}\n{req.spread}\n")
+@app.get('/position', response_class=HTMLResponse)
+async def open_position(symbol, long, type_long, short, type_short, quant_coins):
+    #print(symbol, long, type_long, short, type_short, quant_coins)
+    html_path = Path(__file__).parent / "templates" / "position.html"
+    return html_path.read_text(encoding="utf-8")
 
-        return {"status": "ok"}
-    except Exception as e:
-        print("Ошибка открытия позиции:", e)
-        return {"status": "error", "detail": str(e)}
+
 
 
 # ----- WebSocket сообщения -----
-async def send_message_to_site(text: str, long_price: float, short_price: float, spread: float, exchange_long: str = "", exchange_short: str = "", exchange_short_type: str = "", exchange_long_type: str = "",
-                               symbol: str = "", volume: float = 0, message_id: str | None = None):
+async def message_to_site(symbol, data = None):
 
-    if message_id is None:
-        message_id = str(uuid.uuid4())
-        action = "create"
-    else:
-        action = "update"
+
 
     # Заменяем \n на <br> для HTML
-    text_html = text.replace('\n', '<br>')
 
-    data = {
-        "action": action,
-        "id": message_id,
-        "text": text_html,
-        "exchange_long": {exchange_long: exchange_long_type},
-        "exchange_short": {exchange_short: exchange_short_type},
+    dataa = {
         "symbol": symbol,
-        "volume": volume,
-        'long_price': long_price,
-        'short_price': short_price,
-        'spread': spread
+        'data': data or []
     }
 
     async with lock:
         for ws in list(clients):
             try:
-                await ws.send_json(data)
+                await ws.send_json(dataa)
             except:
                 clients.remove(ws)
 
-    return message_id
-
-async def update_spread(text: str, message_id: str | None = None):
-
-    if message_id is None:
-        message_id = str(uuid.uuid4())
-        action = "create"
-    else:
-        action = "update"
-
-    # Заменяем \n на <br> для HTML
-    text_html = text.replace('\n', '<br>')
-
-    data = {
-        "action": action,
-        "id": message_id,
-        "text": text_html,
-        'message_type': 'update_spread'
-
-    }
-
-    async with lock:
-        for ws in list(clients):
-            try:
-                await ws.send_json(data)
-            except:
-                clients.remove(ws)
-
-    return message_id
+    return symbol
 
 
-async def delete_message_from_site(message_id: str):
-    data = {"action": "delete", "id": message_id}
 
-    async with lock:
-        for ws in list(clients):
-            try:
-                await ws.send_json(data)
-            except:
-                clients.remove(ws)
+async def send_chart_data():
+    while True:
+        await asyncio.sleep(1)  # обновление каждую секунду
+        async with lock_chart:
+            for symbol, clients in list(clients_chart.items()):  # копия словаря
+                if not clients:
+                    del clients_chart[symbol]
+                    continue
+                data = f'{symbol} + {random.randint(1, 666)}'
+                print(data)
+                for ws in set(clients):
+                    try:
+                        await ws.send_json({"chart": data})
+                    except:
+                        clients.discard(ws)
 
+
+async def схождение_покупка():
+    while True:
+        await asyncio.sleep(1)  # обновление каждую секунду
+        async with lock_position:
+            for data, clients in list(clients_position.items()):  # копия словаря
+                if not clients:
+                    del clients_position[data]
+                    continue
+                #data = f'{data} + {random.randint(1, 666)}'
+                print(data)
+                symbol, long, type_long, short, type_short, quant_coins = data
+                quant_coins = random.randint(1, 900)
+                for ws in set(clients):
+                    try:
+                        await ws.send_json({"symbol": symbol, "long": long, "type_long": type_long, "short": short, "type_short": type_short, "quant_coins": quant_coins})
+                    except:
+                        clients.discard(ws)
+                        
+@app.get('/exit_position')
+async def exit_position(symbol, long, type_long, short, type_short, quant_coins):
+    print(f'функция сработала {symbol} {long} {type_long} {short} {type_short} {quant_coins}')
+    data = (symbol, long, type_long, short, type_short, quant_coins)
+    async with lock_position:
+        del clients_position[data]
