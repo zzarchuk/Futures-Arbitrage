@@ -1,4 +1,4 @@
-from переменные import orderbook, lock
+from config import orderbook, lock
 import asyncio
 from collections import defaultdict
 import copy

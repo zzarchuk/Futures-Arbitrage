@@ -6,10 +6,18 @@ from collections import defaultdict
 import time
 
 blacklist = [
+    ('SYNUSDT', 'all', 'all'),
+    ('FUNUSDT', 'all', 'all'),
+    ('CLAWDUSDT', 'htx', 'all'),
+    ('GASUSDT', 'mexc', 'all'),
+    ('FUNUSDT', 'htx', 'all'),
+    ('CVXUSDT', 'htx', 'futures'),
     # ('AIAUSDT', 'all', 'all'),
     # #('PTBUSDT', 'mexc', 'all'),
     # ('LMTSUSDT', 'bingx', 'all'),
     # ('XNLUSDT', 'bingx', 'futures'),
+    ('MTLUSDT', 'htx', 'spot'),
+    ('BDXUSDT', 'bingx', 'futures'),
     ('REALUSDT', 'gateio', 'spot'),
     ('REALUSDT', 'lbank', 'spot'),
     # ('CARDSUSDT', 'bingx', 'all'),
@@ -1004,7 +1012,7 @@ async def lbank_futures(data, session):
                         ):
                             symbol = key.get("symbol")
                             цена = float(key.get("lastPrice"))
-                            funding = float(key.get('fundingRate'))
+                            funding = float(key.get('fundingRate', 0))
                             next = key.get('nextFeeTime')
                             фильтрованный_словарь(
                                 data=data,
@@ -1016,7 +1024,7 @@ async def lbank_futures(data, session):
                                 futures=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет фьючей lbank {e}")
+                        print(f"Ошибка в фильтре перебора монет фьючей lbank {e}\n{key}")
                         continue
                 return
         except Exception as e:

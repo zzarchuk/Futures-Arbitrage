@@ -6,7 +6,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "websocket_proto"))
 
 from sql import Database
 import tracemalloc
-from переменные import orderbook, lock, subscriptions_config, subscriptions_lock
+from config import orderbook, lock, subscriptions_config, subscriptions_lock, lock_candles, data_for_db, for_db, сохраненные_данные
+from тесты import candles
 import asyncio
 import aiohttp
 import websockets
@@ -51,7 +52,7 @@ async def monitor_memory():
 
 # subscriptions_config = {}
 
-
+gate_error = None
 
 
 class ChecksumMismatch(Exception):
@@ -1338,7 +1339,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
     async def _batch_unsubscribe_worker(self):
         """Воркер для batch-отписок раз в 5 минут"""
         while self.is_running:
-            await asyncio.sleep(90)  # 5 минут
+            await asyncio.sleep(300)  # 5 минут
             
             async with self.lock:
                 queue = self.unsub.copy()
@@ -1392,7 +1393,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
 
         current_subscribed = set()
 
-        async with websockets.connect(url, ping_interval=20, ping_timeout=120) as ws:
+        async with websockets.connect(url, ping_interval=10, ping_timeout=60) as ws:
             #print(f"✅ gateio FUTURES conn#{conn_id} connected")
             self.ws_futures = ws
             receive_task = asyncio.create_task(self._process_futures_messages(ws))
@@ -1484,6 +1485,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
                     orderbook[msg.get("result").get("contract", "UNKNOWN").replace("_USDT", "USDT")]["gateio"]["futures"]["bids"] = [
                         [float(l["p"]), float(l["s"])] for l in result.get("bids", [])
                     ]
+                    gate_error = result
                 elif "status" in result:
                     continue
                     # это подтверждение подписки или ошибки
@@ -1493,7 +1495,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
                     print(f"⚠️ Gateio FUTURES unknown message: {msg}")
 
             except Exception as e:
-                print(f"❌ gateio FUTURES parse error: {e}")
+                print(f"❌ gateio FUTURES parse error: {e}\n\n{gate_error}")
 
     async def _handle_spot_connection(self, conn_id: str):
         """Futures соединение с динамическими подписками"""
@@ -2695,11 +2697,19 @@ async def order():
 
 async def арбитраж_повтор(мин_обьем, макс_обьем, шаг, database):
     for_delete = set()
+    time_of_life = {}
+    current_keys = set() 
+    last_seen = {}
+
+
+    candles_3_min = defaultdict(list)
+
 
     try:
         while True:
+            current_keys.clear()
             for_send = set()
-            await asyncio.sleep(1)  # УВЕЛИЧИЛ с 0.2 до 1 секунды
+            await asyncio.sleep(0.2)  # УВЕЛИЧИЛ с 0.2 до 1 секунды
             
             if not orderbook.keys():
                 await asyncio.sleep(1)
@@ -2714,10 +2724,9 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
             #print('начало')
             # Собираем ВСЕ возможности со всех символов
             все_возможности = defaultdict(list)
+            current_time = time.time()
             
             for symbol, exchanges in data.items():
-                if symbol == 'VOOIUSDT':
-                    print(exchanges)
                 словарь_с_ценами = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
                 
                 for exchange, types in exchanges.items():
@@ -2843,10 +2852,41 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                                     спред_юсдт = ((volume * 2) / 100) * spread_total
                                 
                                     #if spread_total >= 9:
-                                    if spred_without_fund >= 2: #or spread_total >= 2: 
+                                    if spred_without_fund >= 6: #or spread_total >= 2: 
+                                        сохраненные_данные.add(f'{symbol}_{int(spred_without_fund)}_{pos_buy["exchange"]}_{pos_buy["market_type"]}_{pos_sell["exchange"]}_{pos_sell["market_type"]}')
+                                        
                                         for_send.add(symbol)
                                         await database.insert_data(pos_buy["exchange"], pos_buy["market_type"], pos_sell["exchange"], pos_sell["market_type"], spred_without_fund, symbol)
                                         
+                                        key = f'{symbol}_{pos_buy["exchange"]}_{pos_buy["market_type"]}_{pos_sell["exchange"]}_{pos_sell["market_type"]}_{volume}'
+                                        
+                                        
+                                        
+                                        
+                                        #попытка работа с данными для графиков
+                                        key_candle = f'{symbol}_{pos_buy["exchange"]}_{pos_buy["market_type"]}_{pos_sell["exchange"]}_{pos_sell["market_type"]}'
+                                        async with lock_candles:
+                                            if key_candle not in data_for_db:
+                                                data_for_db[key_candle] = []
+                                            
+                                            timestamp = int(time.time())
+                                            data_for_db[key_candle].append({'timestamp': timestamp, 'spread': spread_total})
+                                                
+                                                
+                                                
+                                                
+                                        
+                                        current_keys.add(key)
+                                        
+                                        # Если видим первый раз - запоминаем время начала
+                                        if key not in time_of_life:
+                                            time_of_life[key] = current_time
+                                        
+                                        # Обновляем время последнего обнаружения
+                                        last_seen[key] = current_time
+                                        
+                                        # Вычисляем время жизни (сколько секунд существует)
+                                        время_жизни = current_time - time_of_life[key]
 
 
                                         все_возможности[symbol].append({
@@ -2871,8 +2911,17 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
                                             "funding_short": pos_sell["funding"],
                                             "funding_short_time": pos_sell["funding_time"],
                                             "volume": round((volume / pos_buy["buy_avg"]), 4),#
-                                            'total_slippage': total
+                                            'total_slippage': total,
+                                            'lifetime': round(время_жизни)#
                                         })
+            #print(set(все_возможности.keys()))
+            keys_to_delete = set(time_of_life.keys()) - current_keys
+            for key in keys_to_delete:
+                del time_of_life[key]
+                if key in last_seen:
+                    del last_seen[key]
+                    
+                    
             delete = for_delete - for_send
             for_delete = for_send.copy()
             
@@ -2918,6 +2967,8 @@ async def стакан():
         #Обновление конфига (симуляция внешнего источника)
         #asyncio.create_task(update_subscriptions_config()),
         
+        
+        asyncio.create_task(candles(data_for_db=data_for_db, lock=lock_candles, for_db=for_db)),
         
         #BingX
         
@@ -2991,4 +3042,8 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        with open('saved.txt', 'w') as f:
+            for item in сохраненные_данные:
+                f.write(f'{item}\n')
+        #print(data_for_db)
         print("\n✅ Graceful shutdown complete")
