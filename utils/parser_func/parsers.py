@@ -84,6 +84,7 @@ async def арбитраж_повтор(мин_обьем, макс_обьем, 
 
     try:
         while True:
+            
             current_keys.clear()
             for_send = set()
             await asyncio.sleep(0.2)  # УВЕЛИЧИЛ с 0.2 до 1 секунды

@@ -24,5 +24,12 @@ class AppStateForArbitrgage:
             lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         )
         
+class WebsocketState():
+    def __init__(self) -> None:
+        self.lock_websocket = asyncio.Lock()
+        self.websocket_clients = set()
+
+        
+state_websocket = WebsocketState()
 state_filter = AppStateForFilter()
 state_arbitrage = AppStateForArbitrgage()

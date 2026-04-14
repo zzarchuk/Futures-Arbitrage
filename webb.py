@@ -3,11 +3,11 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi.staticfiles import StaticFiles
 import asyncio
-import uuid
 from fastapi.responses import FileResponse
 import random
+from config.config import state_websocket
+
 
 stop_chart = False
 stop_positions = False
@@ -194,6 +194,25 @@ async def open_position(symbol, long, type_long, short, type_short, quant_coins)
 
 
 # ----- WebSocket сообщения -----
+# async def message_to_site(symbol, data = None):
+
+
+
+#     # Заменяем \n на <br> для HTML
+
+#     dataa = {
+#         "symbol": symbol,
+#         'data': data or []
+#     }
+
+#     async with lock:
+#         for ws in list(clients):
+#             try:
+#                 await ws.send_json(dataa)
+#             except:
+#                 clients.remove(ws)
+
+#     return symbol
 async def message_to_site(symbol, data = None):
 
 
@@ -205,12 +224,12 @@ async def message_to_site(symbol, data = None):
         'data': data or []
     }
 
-    async with lock:
-        for ws in list(clients):
+    async with state_websocket.lock_websocket:
+        for ws in list(state_websocket.websocket_clients):
             try:
                 await ws.send_json(dataa)
             except:
-                clients.remove(ws)
+                state_websocket.websocket_clients.remove(ws)
 
     return symbol
 
