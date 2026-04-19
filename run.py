@@ -8,6 +8,9 @@ from pathlib import Path
 from config.config import state_websocket
 from main import стакан
 import asyncio
+from database.database import run_database
+from web.backend.routes.filters_route import filter_router
+from web.backend.routes.stop_run_route import stop_run_router
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -16,15 +19,22 @@ STATIC_DIR = BASE_DIR / "web" / "frontend" / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(стакан())
-    #print(BASE_DIR)
+    # asyncio.create_task(стакан())
+    asyncio.create_task(run_database())
+    # print(BASE_DIR)
     # что будет делать до начала запуска приложения
     yield
     # что будет делать после заверщения приложения
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(filter_router)
+app.include_router(stop_run_router)
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), "static")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,12 +46,14 @@ app.add_middleware(
 templates = Jinja2Templates(directory=BASE_DIR / "web" / "frontend" / "templates")
 
 
-@app.get("/")
-async def get_hello(request: Request):
-    return templates.TemplateResponse(request=request, name='main_page.html')
-
-
-
+@app.get(
+    "/",
+    tags=["Main Page"],
+    summary="Information",
+    description="This endpoint will take you to a page that will describe this pet project in detail, where you can learn about the bots functionality and the technologies that were used to create it.",
+)
+async def main_page(request: Request):
+    return templates.TemplateResponse(request=request, name="main_page.html")
 
 
 @app.websocket("/ws")

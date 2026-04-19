@@ -1,32 +1,153 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Арбитражный Бот - Сигналы</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+<meta charset="UTF-8">
+<title>Arbitrage Spread Monitor API</title>
+<style>
+body {
+    background: #0a0a0a;
+    color: #eaeaea;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 40px;
+}
+
+h1, h2 {
+    color: #ffffff;
+}
+
+.container {
+    max-width: 900px;
+    margin: auto;
+}
+
+.block {
+    border: 1px solid #222;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+}
+
+.code {
+    background: #111;
+    padding: 10px;
+    border-radius: 6px;
+    font-family: monospace;
+    color: #aaa;
+}
+
+.small {
+    color: #777;
+}
+
+</style>
 </head>
 <body>
-  <header>
-    <div class="header-content">
-      <div class="header-title">
-        <div class="logo">🔥</div>
-        <h2>Арбитражный Бот</h2>
-      </div>
-      <div class="status-indicator">
-        <div class="status-dot"></div>
-        <span style="font-size: 13px; font-weight: 500;">Онлайн</span>
-      </div>
-    </div>
-  </header>
-  <table class="signals-table" border="1">
-    <tbody id="table-body">
-    </tbody>
-  </table>
 
+<div class="container">
 
-  <div id="messages"></div>
+<h1>Arbitrage Spread Monitoring API</h1>
+<p class="small">Backend-focused system for real-time cryptocurrency spread detection across multiple exchanges.</p>
 
-  <script src="{{ url_for('static', path='javascript/script.js') }}"></script>
+<div class="block">
+<h2>📌 Overview</h2>
+<p>
+This project is a backend-heavy system built with FastAPI, designed to identify arbitrage opportunities across crypto derivatives markets.
+</p>
+
+<p>
+It aggregates data from multiple exchanges (Binance, Bybit, OKX, KuCoin, MEXC, Bitget, Gate, HTX, BingX),
+filters tradable instruments, and streams real-time spreads via WebSocket.
+</p>
+</div>
+
+<div class="block">
+<h2>⚙️ Architecture</h2>
+<ul>
+<li><b>Data Discovery Layer</b> — collects available futures pairs across exchanges</li>
+<li><b>Filtering Engine</b> — selects assets traded on ≥2 exchanges with spread potential</li>
+<li><b>Streaming Layer</b> — connects to exchange WebSockets (orderbooks, funding)</li>
+<li><b>Computation Engine</b> — calculates spread & funding-adjusted spread</li>
+<li><b>Delivery Layer</b> — REST API + WebSocket streaming</li>
+<li><b>Storage Layer</b> — SQLite (SQLAlchemy)</li>
+</ul>
+</div>
+
+<div class="block">
+<h2>📡 REST API</h2>
+
+<div class="code">GET /api/v1/market/spreads?symbol=BTC&min_spread=0.5</div>
+<p>Returns real-time spreads in JSON format</p>
+
+<div class="code">GET /api/v1/market/spreads/stream</div>
+<p>Simple dashboard with live WebSocket feed</p>
+
+<div class="code">GET /api/v1/analytics/spreads/chart</div>
+<p>Spread chart + historical data</p>
+
+<div class="code">GET /api/v1/market/spreads/top</div>
+<p>Top spreads over selected period</p>
+
+<div class="code">GET /api/v1/market/statistics</div>
+<p>Aggregated statistics</p>
+
+<div class="code">GET /api/v1/config/blacklist</div>
+<p>Blacklisted symbols</p>
+
+<div class="code">GET /api/v1/filters</div>
+<p>Active filtering configurations</p>
+
+<div class="code">GET /api/v1/system/parser/status</div>
+<p>Parser state (running / stopped)</p>
+
+</div>
+
+<div class="block">
+<h2>🛠 Management</h2>
+
+<div class="code">POST /api/v1/filters</div>
+<p>Create new filter</p>
+
+<div class="code">POST /api/v1/alerts</div>
+<p>Create alert for symbol or spread threshold</p>
+
+<div class="code">POST /api/v1/system/parser/start</div>
+<p>Start parser</p>
+
+<div class="code">POST /api/v1/system/parser/stop</div>
+<p>Stop parser</p>
+
+</div>
+
+<div class="block">
+<h2>🔌 WebSocket</h2>
+
+<div class="code">WS /ws/market/spreads</div>
+<p>Real-time spread streaming</p>
+
+</div>
+
+<div class="block">
+<h2>🗄 Database</h2>
+<ul>
+<li>filters</li>
+<li>spread_history</li>
+<li>alerts</li>
+<li>statistics</li>
+</ul>
+</div>
+
+<div class="block">
+<h2>📊 Logging</h2>
+<p>Structured logging with request tracing, latency tracking and error monitoring.</p>
+</div>
+
+<div class="block">
+<h2>🧠 Notes</h2>
+<p>This project is primarily backend-focused. The frontend is intentionally minimal and used only for demonstration purposes.</p>
+</div>
+
+</div>
+
 </body>
 </html>
