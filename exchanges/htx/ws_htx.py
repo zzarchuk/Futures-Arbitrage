@@ -7,7 +7,9 @@ import websockets
 import json
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager    
+import logging
 
+logger = logging.getLogger(__name__)
 
 class HtxDynamicWS(BaseDynamicWSClient):
     def __init__(self, manager: DynamicSubscriptionManager):
@@ -29,7 +31,6 @@ class HtxDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f" htx processing {len(queue)} unsubscribes")
                 
                 for market, data in queue.items():
                     for symbol in data:
@@ -43,10 +44,10 @@ class HtxDynamicWS(BaseDynamicWSClient):
                                 }
                                 await self.ws_futures.send(json.dumps(unsub))# type: ignore
                             
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.3)
                             
                         except Exception as e:
-                            print(f"Batch htx unsubscribe error {symbol}: {e}")
+                            logger.error(f"Htx WS unsubscribe error {symbol}: {e}", exc_info=True)
                 
                 #async with lock:
                 for type, symbols in queue.items():
@@ -93,7 +94,7 @@ class HtxDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"htx FUTURES subscribe error {symbol}: {e}")
+                            logger.error(f"Htx WS FUTURES subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -158,7 +159,7 @@ class HtxDynamicWS(BaseDynamicWSClient):
                     ]["futures"]["bids"] = msg["tick"]["bids"]
 
             except Exception as e:
-                print(f"htx FUTURES parse error: {e}")
+                logger.error(f"Htx WS FUTURES parse error: {e}", exc_info=True)
 
     async def _handle_spot_connection(self):
 
@@ -186,9 +187,9 @@ class HtxDynamicWS(BaseDynamicWSClient):
                             sub = {"sub": [f"market.{symbol.lower()}.depth.step0"]}
                             await ws.send(json.dumps(sub))
                             current_subscribed.add(symbol)
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.2)
                         except Exception as e:
-                            print(f"htx spot subscribe error {symbol}: {e}")
+                            logger.error(f"Htx WS spot subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -249,7 +250,7 @@ class HtxDynamicWS(BaseDynamicWSClient):
                     ]["htx"]["spot"]["bids"] = msg["tick"]["bids"]
 
             except Exception as e:
-                print(f"htx FUTURES parse error: {e}")
+                logger.error(f"Htx WS FUTURES parse error: {e}", exc_info=True)
 
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot")

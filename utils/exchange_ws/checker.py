@@ -2,7 +2,9 @@ import asyncio
 import copy
 from typing import Set
 from config.config import state_filter
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 class ChecksumMismatch(Exception):
@@ -25,7 +27,6 @@ class DynamicSubscriptionManager:
                 current = set(config_dict.keys())
 
             if current != set(self.previous_config.keys()):
-                #print(f"🔄 Detected configuration change!")
                 self.previous_config = copy.deepcopy(config_dict)
                 self.change_event.set()  # Сигнал всем классам обновиться
 
@@ -81,9 +82,8 @@ class BaseDynamicWSClient:
             except Exception as e:
                 retry_count += 1
                 wait_time = min(2**retry_count, 60)
-                print(
-                    f"❌ {self.exchange_name} conn#{conn_id} error: {e}. Reconnect in {wait_time}s..."
-                )
+                logger.warning(f"❌ {self.exchange_name} conn#{conn_id} error: {e}. Reconnect in {wait_time}s...", exc_info=True)
+                
                 await asyncio.sleep(wait_time)
 
     def stop(self):

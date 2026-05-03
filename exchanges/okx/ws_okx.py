@@ -8,6 +8,9 @@ import json
 from binascii import crc32
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager
+import logging
+
+logger = logging.getLogger(__name__)
 
 class OkxDynamicWS(BaseDynamicWSClient):
     def __init__(self, manager: DynamicSubscriptionManager):
@@ -68,7 +71,7 @@ class OkxDynamicWS(BaseDynamicWSClient):
 
         if action == 'snapshot':
             if prev_seq != -1:
-                print(f"Некорректный snapshot: prevSeqId должен быть -1, получено {prev_seq}")
+                logger.info(f"Некорректный snapshot: prevSeqId должен быть -1, получено {prev_seq}")
             ob['bids'] = [[float(b[0]), float(b[1])] for b in data.get('bids', [])]
             ob['asks'] = [[float(a[0]), float(a[1])] for a in data.get('asks', [])]
         else:
@@ -76,12 +79,12 @@ class OkxDynamicWS(BaseDynamicWSClient):
             if ob['seqId'] is not None:
                 if prev_seq != ob['seqId']:
                     if seq < prev_seq:
-                        print(f"Обнаружен reset последовательности: prevSeqId={prev_seq}, seqId={seq}")
+                        logger.info(f"Обнаружен reset последовательности: prevSeqId={prev_seq}, seqId={seq}")
                     elif prev_seq == seq:
-                        print(f"Heartbeat сообщение: seqId={seq}")
+                        logger.info(f"Heartbeat сообщение: seqId={seq}")
                         return
                     else:
-                        print(f"Пропуск сообщения! Ожидается prevSeqId={ob['seqId']}, получено {prev_seq}")
+                        logger.info(f"Пропуск сообщения! Ожидается prevSeqId={ob['seqId']}, получено {prev_seq}")
                         return
             
             bids_dict = {b[0]: b[1] for b in ob['bids']}
@@ -116,7 +119,6 @@ class OkxDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f"🗑️ okx processing {len(queue)} unsubscribes")
                 
                 for market, data in queue.items():
                     for symbol in data:
@@ -141,7 +143,7 @@ class OkxDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.05)  # Небольшая задержка между unsub
                             
                         except Exception as e:
-                            print(f"Batch okx unsubscribe error {symbol}: {e}")
+                            logger.error(f"Batch okx WS unsubscribe error {symbol}: {e}", exc_info=True)
                 
                 #async with lock:
                 for type, symbols in queue.items():
@@ -185,7 +187,7 @@ class OkxDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"okx FUTURES subscribe error {symbol}: {e}")
+                            logger.error(f"Okx WS FUTURES subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -261,10 +263,8 @@ class OkxDynamicWS(BaseDynamicWSClient):
                     
                       
             except Exception as e:
-                print(f"Ошибка: {e}")
-                import traceback
-                traceback.print_exc()
-                                
+                logger.error(f'Error: {e}', exc_info=True)
+
     async def _handle_spot_connection(self):
 
         url = f"wss://wspap.okx.com:8443/ws/v5/public"
@@ -299,7 +299,7 @@ class OkxDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"okx spot subscribe error {symbol}: {e}")
+                            logger.error(f"Okx WS spot subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -377,9 +377,8 @@ class OkxDynamicWS(BaseDynamicWSClient):
                     
                       
             except Exception as e:
-                print(f"Ошибка: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f'Error: {e}', exc_info=True)
+
     
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot")

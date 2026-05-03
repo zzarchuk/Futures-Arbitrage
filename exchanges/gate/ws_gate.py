@@ -6,6 +6,9 @@ import json
 
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager    
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class GateioDynamicWS(BaseDynamicWSClient):
@@ -26,7 +29,6 @@ class GateioDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f"gateio processing {len(queue)} unsubscribes")
                 
                 for market, data in queue.items():
                     for symbol in data:
@@ -49,7 +51,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.05)  # Небольшая задержка между unsub
                             
                         except Exception as e:
-                            print(f"Batch gateio unsubscribe error {symbol}: {e}")
+                            logger.error(f"Gateio WS unsubscribe error {symbol}: {e}", exc_info=True)
                 
                 for type, symbols in queue.items():
                     for symbol in symbols:
@@ -98,7 +100,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"gateio FUTURES subscribe error {symbol}: {e}")
+                            logger.error(f"Gateio WS FUTURES subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -157,10 +159,10 @@ class GateioDynamicWS(BaseDynamicWSClient):
                 elif "status" in result:
                     continue
                 else:
-                    print(f"Gateio FUTURES unknown message: {msg}")
+                    logger.info(f"Gateio WS FUTURES unknown message: {msg}")
 
             except Exception as e:
-                print(f"gateio FUTURES parse error: {e}\n\n{gate_error}")
+                logger.error(f"Gateio WS FUTURES parse error: {e}\n\n{gate_error}", exc_info=True)
 
     async def _handle_spot_connection(self):
         url = f"wss://api.gateio.ws/ws/v4/"
@@ -199,7 +201,7 @@ class GateioDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"gateio spot subscribe error {symbol}: {e}")
+                            logger.error(f"Gateio WS spot subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -260,10 +262,10 @@ class GateioDynamicWS(BaseDynamicWSClient):
                 elif "status" in result:
                     continue
                 else:
-                    print(f"Gateio spot unknown message: {msg}")
+                    logger.info(f"Gateio WS spot unknown message: {msg}")
 
             except Exception as e:
-                print(f"gateio spot parse error: {e}")
+                logger.error(f"Gateio WS spot parse error: {e}", exc_info=True)
 
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot")

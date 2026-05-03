@@ -1,5 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def binance_spot(data, session):
     async def price():
@@ -20,7 +23,7 @@ async def binance_spot(data, session):
                             spot=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет спота price binance {e}")
+                    logger.error(f"Binance spot API: {e}", exc_info=True)
                     continue
         return
     
@@ -53,7 +56,7 @@ async def binance_spot(data, session):
                             spot=True
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет спота volume binance {e}")
+                    logger.error(f"Binance spot API volume: {e}", exc_info=True)
                     continue
         return
     for i in range(1, 7):
@@ -61,7 +64,7 @@ async def binance_spot(data, session):
             await asyncio.gather(price(), volume())
             break
         except Exception as e:
-            print(f"Ошибка в binance в файле фильтра спота\n{e}")
+            logger.error(f"Binance spot API filter: {e}", exc_info=True)
             await asyncio.sleep(0.5)
             
             
@@ -80,7 +83,7 @@ async def binance_futures(data, session):
                             начисление = k.get('nextFundingTime')
                             filtered_dict(data=data, symbol=symbol, exchange='binance', funding=фандинг, get_funding=начисление)
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет funding фьючей binance {e}")
+                        logger.error(f"Binance futures API: {e}", exc_info=True)
                         continue
         return
         
@@ -102,7 +105,7 @@ async def binance_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей binance {e}")
+                    logger.error(f"Binance futures API: {e}", exc_info=True)
                     continue
         return
 
@@ -112,7 +115,7 @@ async def binance_futures(data, session):
             await asyncio.gather(binance_price(), binance_funding())
             break
         except Exception as e:
-            print(f"Ошибка в binance в файле фильтра фьючей\n{e}")
+            logger.error(f"Binance futures API: {e}", exc_info=True)
             await asyncio.sleep(0.5)
 
 async def binance_volume_futures(session, data):
@@ -132,6 +135,6 @@ async def binance_volume_futures(session, data):
                         continue
                     data[symbol]['binance']['futures']['max_vol'] = max_market_qty * price
             except Exception as e:
-                print(f"Ошибка в фильтре перебора монет volume фьючей binance {e}")
+                logger.error(f"Binance futures API: {e}", exc_info=True)
                 continue
     return data

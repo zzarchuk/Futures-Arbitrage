@@ -1,6 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 
@@ -25,11 +27,11 @@ async def okx_spot(data, session):
                                 spot=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет спота okx {e}")
+                        logger.error(f"Okx API spot: {e}", exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в оkx в файле фильтра спота\n{e}")
+            logger.error(f"Okx API spot: {e}", exc_info=True)
             await asyncio.sleep(0.5)
             
             
@@ -58,7 +60,7 @@ async def okx_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей okx {e}")
+                    logger.error(f"Okx API futures: {e}", exc_info=True)
                     continue
         return
     async def fundings():
@@ -75,7 +77,7 @@ async def okx_futures(data, session):
                         начисление = float(k.get('fundingTime'))
                         filtered_dict(data=data, symbol=symbol, exchange='okx', funding=фандинг, get_funding=начисление)
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей fund okx {e}")
+                    logger.error(f"Okx API futures: {e}", exc_info=True)
                     continue
         return
     for i in range(1, 7):
@@ -83,5 +85,5 @@ async def okx_futures(data, session):
             await asyncio.gather(price(), fundings())
             break
         except Exception as e:
-            print(f"Ошибка в оkx в файле фильтра фьючей\n{e}")
+            logger.error(f"Okx API futures: {e}", exc_info=True)
             await asyncio.sleep(0.5)

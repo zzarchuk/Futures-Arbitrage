@@ -11,7 +11,9 @@ import json
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager
 #from websocket_proto import PushDataV3ApiWrapper_pb2, PublicDealsV3Api_pb2
 import PushDataV3ApiWrapper_pb2
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 
@@ -47,7 +49,6 @@ class MexcDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f" mexc processing {len(queue)} unsubscribes")
                 
                 # Отправляем unsub для каждого символа
                 for market, data in queue.items():
@@ -69,10 +70,10 @@ class MexcDynamicWS(BaseDynamicWSClient):
                                 await self.ws_futures.send(json.dumps(unsub))# type: ignore
                             
                             #print(f"mexc batch unsubscribed: {symbol}")
-                            await asyncio.sleep(0.05)  # Небольшая задержка между unsub
+                            await asyncio.sleep(0.1)  # Небольшая задержка между unsub
                             
                         except Exception as e:
-                            print(f"❌ Batch mexc unsubscribe error {symbol}: {e}")
+                            logger.error(f"Batch Mexc WS unsubscribe error {symbol}: {e}", exc_info=True)
                 
 
                 for type, symbols in queue.items():
@@ -122,7 +123,7 @@ class MexcDynamicWS(BaseDynamicWSClient):
                            
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"❌ MEXC SPOT subscribe error {symbol}: {e}")
+                            logger.error(f"MEXC WS SPOT subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -188,7 +189,7 @@ class MexcDynamicWS(BaseDynamicWSClient):
                         state_arbitrage.orderbook_arbitrage[symbol]["mexc"]["spot"]["asks"] = asks
                         state_arbitrage.orderbook_arbitrage[symbol]["mexc"]["spot"]["bids"] = bids
             except Exception as e:
-                print(f"❌ MEXC SPOT parse error: {e}")
+                logger.error(f"MEXC WS SPOT parse error: {e}", exc_info=True)
 
     async def _handle_futures_connection(self):
         url = "wss://contract.mexc.com/edge"
@@ -222,7 +223,7 @@ class MexcDynamicWS(BaseDynamicWSClient):
                             #print(f"➕ MEXC FUTURES subscribed: {symbol}")
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"❌ MEXC FUTURES subscribe error {symbol}: {e}")
+                            logger.error(f"MEXC WS FUTURES subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -282,7 +283,7 @@ class MexcDynamicWS(BaseDynamicWSClient):
                     state_arbitrage.orderbook_arbitrage[symbol]["mexc"]["futures"]["asks"] = msg["data"]["asks"]
                     state_arbitrage.orderbook_arbitrage[symbol]["mexc"]["futures"]["bids"] = msg["data"]["bids"]
             except Exception as e:
-                print(f"❌ MEXC FUTURES parse error: {e}")
+                logger.error(f"MEXC WS FUTURES parse error: {e}", exc_info=True)
 
     async def run_spot(self):
         target_symbols = self.manager.get_symbols_for_exchange("mexc", "spot")

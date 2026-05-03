@@ -1,6 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 async def bitget_spot(data, session):
@@ -23,11 +25,11 @@ async def bitget_spot(data, session):
                                 spot=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет спота bitget {e}")
+                        logger.error(f'Bitget API spot: {e}', exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в bitget в файле фильтра спота\n{e}")
+            logger.error(f'Bitget API spot: {e}', exc_info=True)
             await asyncio.sleep(0.5)
             
 async def bitget_futures(data, session):
@@ -49,7 +51,7 @@ async def bitget_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей bitget {e}")
+                    logger.error(f'Bitget API futures: {e}', exc_info=True)
                     continue
 
         return
@@ -65,7 +67,7 @@ async def bitget_futures(data, session):
                     начисление = float(k.get('nextUpdate'))
                     filtered_dict(data=data, symbol=symbol, exchange='bitget', funding=фандинг, get_funding=начисление)
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей fundings bitget {e}")
+                    logger.error(f'Bitget API futures: {e}', exc_info=True)
                     continue
         return
     
@@ -74,5 +76,5 @@ async def bitget_futures(data, session):
             await asyncio.gather(price(), fundings())
             break
         except Exception as e:
-            print(f"Ошибка в bitget в файле фильтра фьючей\n{e}")
+            logger.error(f'Bitget API futures: {e}', exc_info=True)
             await asyncio.sleep(0.5)

@@ -6,7 +6,9 @@ import json
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager    
 
+import logging
 
+logger = logging.getLogger(__name__)
 
 class BinanceDynamicWS(BaseDynamicWSClient):
 
@@ -53,10 +55,10 @@ class BinanceDynamicWS(BaseDynamicWSClient):
                             state_arbitrage.orderbook_arbitrage[symbol]["binance"]["spot"]["bids"] = bids
 
                         except Exception as e:
-                            print(f"Binance SPOT parse error: {e}")
+                            logger.error(f"Binance spot WS: {e}", exc_info=True)
 
             except Exception as e:
-                print(f"Binance SPOT connection error: {e}. Reconnecting in 5s...")
+                logger.error(f"Binance spot WS reconect: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
     async def _handle_futures_connection(self):
@@ -106,12 +108,10 @@ class BinanceDynamicWS(BaseDynamicWSClient):
                             # state_arbitrage.orderbook_arbitrage[symbol]["binance"]["futures"]["bids"] = bids
 
                         except Exception as e:
-                            print(f"Binance FUTURES parse error: {e}")
+                            logger.error(f"Binance futures WS: {e}", exc_info=True)
 
             except Exception as e:
-                print(
-                    f"Binance FUTURES connection error: {e}. Reconnecting in 5s..."
-                )
+                logger.error(f"Binance futures WS reconect: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
     async def run_spot(self):

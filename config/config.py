@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict
 
+
 # orderbook = defaultdict(
 #     lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 # )
@@ -27,9 +28,22 @@ class AppStateForArbitrgage:
 class WebsocketState():
     def __init__(self) -> None:
         self.lock_websocket = asyncio.Lock()
-        self.websocket_clients = set()
-
+        self.websocket_clients = dict()
         
+
+class TaskState():
+    def __init__(self) -> None:
+        self.tasks = {}
+    
+class CandlesState():
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.candle_data = dict()
+
+
+
+state_candles = CandlesState()
+state_tasks = TaskState()
 state_websocket = WebsocketState()
 state_filter = AppStateForFilter()
 state_arbitrage = AppStateForArbitrgage()

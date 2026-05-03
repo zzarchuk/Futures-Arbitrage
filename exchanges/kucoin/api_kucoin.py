@@ -1,6 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
 
+logger = logging.getLogger(__name__)
 
 async def kucoin_spot(data, session):
     for i in range(1, 7):
@@ -26,11 +28,11 @@ async def kucoin_spot(data, session):
                                 spot=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет спота kucoin {e}")
+                        logger.error(f"Kucoin API spot: {e}", exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в kucoin в файле фильтра спота\n{e}")
+            logger.error(f"Kucoin API spot: {e}", exc_info=True)
             await asyncio.sleep(0.5)
             
 
@@ -53,7 +55,7 @@ async def kucoin_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей kucoin {e}")
+                    logger.error(f"Kucoin API futures: {e}", exc_info=True)
                     continue
         return
     async def fundings():
@@ -70,7 +72,7 @@ async def kucoin_futures(data, session):
                         начисление = float(k.get('nextFundingRateDateTime'))
                     filtered_dict(data=data, symbol=symbol, exchange='kucoin', funding=фандинг, get_funding=начисление)
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей fund kucoin {e}")
+                    logger.error(f"Kucoin API futures: {e}", exc_info=True)
                     continue
         return
     for i in range(1, 7):
@@ -78,5 +80,5 @@ async def kucoin_futures(data, session):
             await asyncio.gather(price(), fundings())
             break
         except Exception as e:
-            print(f"Ошибка в kucoin в файле фильтра фьючей\n{e}")
+            logger.error(f"Kucoin API futures: {e}", exc_info=True)
             await asyncio.sleep(0.5)

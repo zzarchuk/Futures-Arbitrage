@@ -2,6 +2,9 @@ import asyncio
 from exchanges.binance.api_binance import binance_volume_futures
 from utils.exchange_api.filter_api import filtered_dict, get_time_until_funding
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 cached_mexc_data = {}
 last_mexc_update = 0 
@@ -34,7 +37,7 @@ async def mexc_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"[MEXC futures ticker] Ошибка при обработке пары: {e}")
+                    logger.error(f"Mexc API futures: {e}", exc_info=True)
                     continue
 
 
@@ -52,13 +55,13 @@ async def mexc_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"[MEXC futures detail] Ошибка при обработке пары: {e}")
+                    logger.error(f"Mexc API futures: {e}", exc_info=True)
                     continue
 
             return
 
         except Exception as e:
-            print(f"Ошибка в mexc в файле фильтра фьючей: {e}")
+            logger.error(f"Mexc API futures: {e}", exc_info=True)
             await asyncio.sleep(0.5)
 
 
@@ -84,7 +87,7 @@ async def mexc_spot(data, session):
                             spot=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет спота price mexc {e}")
+                    logger.error(f"Mexc API spot: {e}", exc_info=True)
                     continue
         return
     
@@ -107,7 +110,7 @@ async def mexc_spot(data, session):
                             spot=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет спота volume mexc {e}")
+                    logger.error(f"Mexc API spot: {e}", exc_info=True)
                     continue
         return
     
@@ -116,7 +119,7 @@ async def mexc_spot(data, session):
             await asyncio.gather(price(), max_volume())
             break
         except Exception as e:
-            print(f"Ошибка в mexc в файле фильтра спота\n{e}")
+            logger.error(f"Mexc API spot: {e}", exc_info=True)
             await asyncio.sleep(0.5)
 
 
@@ -143,7 +146,7 @@ async def mexc_fundings(data, session):  # максимум 20 одноврем�
                         data[key]['mexc']['futures']['get_funding'] = get_time_until_funding(get, 'mexc')
 
         except Exception as e:
-            print(f'Ошибка MEXC {symbol}: {e}')
+            logger.error(f"Mexc API fundings: {e}", exc_info=True)
 
     symbols = [
         symbol.replace('USDT', '_USDT')

@@ -1,6 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
 
+logger = logging.getLogger(__name__)
 
 async def gateio_spot(data, session):
     for i in range(1, 7):
@@ -26,11 +28,11 @@ async def gateio_spot(data, session):
                                 spot=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет спота gateio {e}")
+                        logger.error(f"Gate API spot: {e}", exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в gateio в файле фильтра спота\n{e}")
+            logger.error(f"Gate API spot: {e}", exc_info=True)
             await asyncio.sleep(0.5)
 
 
@@ -58,7 +60,7 @@ async def gateio_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей gateio {e}")
+                    logger.error(f"Gate API futures: {e}", exc_info=True)
                     continue
         return
     
@@ -78,7 +80,7 @@ async def gateio_futures(data, session):
                         # индекс = float(k.get('index_price'))
                         filtered_dict(data=data, symbol=symbol, exchange='gateio', funding=фандинг, get_funding=начисление)
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей fund gateio {e}")
+                    logger.error(f"Gate API futures: {e}", exc_info=True)
                     continue
         return
     for i in range(1, 7):
@@ -86,5 +88,5 @@ async def gateio_futures(data, session):
             await asyncio.gather(price(), fundings())
             break
         except Exception as e:
-            print(f"Ошибка в gateio в файле фильтра фьючей\n{e}")
+            logger.error(f"Gate API futures: {e}", exc_info=True)
             await asyncio.sleep(0.5)

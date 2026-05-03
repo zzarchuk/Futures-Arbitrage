@@ -8,7 +8,9 @@ import json
 import time
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager         
-         
+import logging
+
+logger = logging.getLogger(__name__)
          
          
 class KucoinDynamicWS(BaseDynamicWSClient):
@@ -29,8 +31,7 @@ class KucoinDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f"kucoin processing {len(queue)} unsubscribes")
-                
+                                
                 for market, data in queue.items():
                     for symbol in data:
                         try:
@@ -54,7 +55,7 @@ class KucoinDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.05)
                             
                         except Exception as e:
-                            print(f"Batch kucoin unsubscribe error {symbol}: {e}")
+                            logger.error(f"Batch Kucoin WS unsubscribe error {symbol}: {e}")
                 
                 #async with lock:
                 for type, symbols in queue.items():
@@ -108,7 +109,7 @@ class KucoinDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"Kucoin FUTURES subscribe error {symbol}: {e}")
+                            logger.error(f"Kucoin WS FUTURES subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -185,7 +186,7 @@ class KucoinDynamicWS(BaseDynamicWSClient):
                     ]
 
             except Exception as e:
-                print(f"Kucoin FUTURES parse error: {e}")
+                logger.error(f"Kucoin FUTURES WS parse error: {e}", exc_info=True)
 
     async def _handle_spot_connection(self):
         async with aiohttp.ClientSession() as session:
@@ -223,7 +224,7 @@ class KucoinDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f" Kucoin spot subscribe error {symbol}: {e}")
+                            logger.error(f"Kucoin WS spot subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -296,7 +297,7 @@ class KucoinDynamicWS(BaseDynamicWSClient):
                     ]
 
             except Exception as e:
-                print(f"Kucoin spot parse error: {e}")
+                logger.error(f"Kucoin WS spot parse error: {e}", exc_info=True)
 
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot")

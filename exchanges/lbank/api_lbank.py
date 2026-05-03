@@ -1,6 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
 
+logger = logging.getLogger(__name__)
 
 async def lbank_futures(data, session):
     
@@ -33,11 +35,11 @@ async def lbank_futures(data, session):
                                 futures=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет фьючей lbank {e}\n{key}")
+                        logging.error(f'Lbank API futures: {e}', exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в lbank в файле фильтра фьючей\n{e}")
+            logging.error(f'Lbank API futures: {e}', exc_info=True)
             await asyncio.sleep(0.5)
 
 
@@ -62,9 +64,9 @@ async def lbank_spot(data, session):
                                 spot=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет спота lbank {e}")
+                        logging.error(f'Lbank API spot: {e}', exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в lbank в файле фильтра спота\n{e}")
+            logging.error(f'Lbank API spot: {e}', exc_info=True)
             await asyncio.sleep(0.5)

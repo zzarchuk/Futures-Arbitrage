@@ -7,7 +7,9 @@ import json
 import time
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager    
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 class BybitDynamicWS(BaseDynamicWSClient):
@@ -58,7 +60,7 @@ class BybitDynamicWS(BaseDynamicWSClient):
                                 current_subscribed.update(batch)
                                 await asyncio.sleep(0.1)
                             except Exception as e:
-                                print(f"❌ Bybit {self.market} subscribe error: {e}")
+                                logger.error(f"Bybit {self.market} subscribe error: {e}", exc_info=True)
 
                     if to_unsubscribe:
                         unsubscribe_list = list(to_unsubscribe)
@@ -88,7 +90,7 @@ class BybitDynamicWS(BaseDynamicWSClient):
                                                 ]
                                 await asyncio.sleep(0.1)
                             except Exception as e:
-                                print(f" Bybit {self.market} unsubscribe error: {e}")
+                                logger.error(f" Bybit {self.market} unsubscribe error: {e}", exc_info=True)
 
                     try:
                         await asyncio.wait_for(
@@ -175,7 +177,7 @@ class BybitDynamicWS(BaseDynamicWSClient):
                     ]["asks"].sort(key=lambda x: x[0])
 
             except Exception as e:
-                print(f"Bybit {self.market} parse error: {e}")
+                logger.error(f"Bybit {self.market} parse error: {e}", exc_info=True)
 
     async def run(self):
         await self._reconnect_wrapper(self._handle_connection, "main")

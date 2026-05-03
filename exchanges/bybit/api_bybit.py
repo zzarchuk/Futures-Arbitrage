@@ -1,6 +1,8 @@
 import asyncio
 from utils.exchange_api.filter_api import filtered_dict
+import logging
 
+logger = logging.getLogger(__name__)
 
 async def bybit_futures(data, session):
     async def bybit_fundings():
@@ -19,7 +21,7 @@ async def bybit_futures(data, session):
 
                             filtered_dict(data=data, symbol=symbol, exchange='bybit', funding=фандинг, get_funding=начисление)
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет funding фьючей bybit {e}")
+                        logger.error(f"Bybit API futures: {e}", exc_info=True)
                         continue                        
         return
     
@@ -42,7 +44,7 @@ async def bybit_futures(data, session):
                             futures=True,
                         )
                 except Exception as e:
-                    print(f"Ошибка в фильтре перебора монет фьючей bybit {e}")
+                    logger.error(f"Bybit API futures: {e}", exc_info=True)
                     continue
         return
 
@@ -51,7 +53,7 @@ async def bybit_futures(data, session):
             await asyncio.gather(bybit_fundings(), price())
             break
         except Exception as e:
-            print(f"Ошибка в bybit в файле фильтра фьючей\n{e}")
+            logger.error(f"Bybit API futures: {e}", exc_info=True)
             await asyncio.sleep(0.5)
 
 
@@ -78,9 +80,9 @@ async def bybit_spot(data, session):
                                 spot=True,
                             )
                     except Exception as e:
-                        print(f"Ошибка в фильтре перебора монет спота bybit {e}")
+                        logger.error(f"Bybit API spot: {e}", exc_info=True)
                         continue
                 return
         except Exception as e:
-            print(f"Ошибка в bybit в файле фильтра спота\n{e}")
+            logger.error(f"Bybit API spot: {e}", exc_info=True)
             await asyncio.sleep(0.5)

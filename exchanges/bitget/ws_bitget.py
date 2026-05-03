@@ -6,7 +6,9 @@ import websockets
 import json
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager    
+import logging
 
+logger = logging.getLogger(__name__)
 
 class BitgetDynamicWS(BaseDynamicWSClient):
 
@@ -35,7 +37,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f" bitget processing {len(queue)} unsubscribes")
+
                 
                 for market, data in queue.items():
                     for symbol in data:
@@ -68,7 +70,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.05)
                             
                         except Exception as e:
-                            print(f"Batch bitget unsubscribe error {symbol}: {e}")
+                            logger.error(f'Bitger WS unsub error: {e}', exc_info=True)
                 
                 for type, symbols in queue.items():
                     for symbol in symbols:
@@ -118,7 +120,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f" Bitget FUTURES subscribe error {symbol}: {e}")
+                            logger.error(f'Bitget WS sub error: {symbol} {e}', exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -180,7 +182,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                         "futures"
                     ]["bids"] = [[float(price), float(size)] for price, size in msg['data'][0]['bids']]#msg["data"][0]["bids"]
             except Exception as e:
-                print(f" Bitget FUTURES parse error: {e}")
+                logger.error(f"Bitget WS parse error: {e}", exc_info=True)
 
     async def _handle_spot_connection(self):
         url = "wss://ws.bitget.com/v2/ws/public"
@@ -219,7 +221,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.05)
                         except Exception as e:
-                            print(f"Bitget spot subscribe error {symbol}: {e}")
+                            logger.error(f"Bitget WS subscribe error {symbol}: {e}", exc_info=True)
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -276,7 +278,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                         "bids"
                     ] = [[float(price), float(size)] for price, size in msg['data'][0]['bids']]#msg["data"][0]["bids"]
             except Exception as e:
-                print(f" Bitget spot parse error: {e}")
+                logger.error(f" Bitget WS parse error: {e}", exc_info=True)
 
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot")

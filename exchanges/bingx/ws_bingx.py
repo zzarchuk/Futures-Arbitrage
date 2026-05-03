@@ -8,6 +8,10 @@ import json
 
 from utils.exchange_ws.checker import BaseDynamicWSClient, DynamicSubscriptionManager    
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class BingxDynamicWS(BaseDynamicWSClient):
@@ -30,7 +34,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                 self.unsub.clear()
 
             if queue:
-                print(f"BingX processing {len(queue)} unsubscribes")
+                
                 
                 for market, data in queue.items():
                     for symbol in data:
@@ -53,7 +57,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.05)  # Небольшая задержка между unsub
                             
                         except Exception as e:
-                            print(f" Batch bingx unsubscribe error {symbol}: {e}")
+                            logger.error(f" Batch bingx unsubscribe error {symbol}: {e}", exc_info=True)
                 
                 for type, symbols in queue.items():
                     for symbol in symbols:
@@ -98,7 +102,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.1)
                         except Exception as e:
-                            print(f" Subscribe error {symbol}: {e}")
+                            logger.error(f'Bingx spot error: {e}', exc_info=True)
 
                     for symbol in to_unsubscribe:
                         current_subscribed.remove(symbol)
@@ -142,7 +146,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                 state_arbitrage.orderbook_arbitrage[base]["bingx"]["spot"]["bids"] = [[float(price), float(size)] for price, size in bids]
 
             except Exception as e:
-                print(f" BingX SPOT parse error: {e}")
+                logger.error(f'Bingx spot parse messages error: {e}', exc_info=True)
 
     async def _handle_futures_connection(self):
         url = "wss://open-api-swap.bingx.com/swap-market"
@@ -174,7 +178,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                             current_subscribed.add(symbol)
                             await asyncio.sleep(0.1)
                         except Exception as e:
-                            print(f"Subscribe error {symbol}: {e}")
+                            logger.error(f'Bingx WS subscibe error: {e}', exc_info=True)
 
                     for symbol in to_unsubscribe:
                         current_subscribed.remove(symbol)
@@ -222,7 +226,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                 state_arbitrage.orderbook_arbitrage[base]["bingx"]["futures"]["bids"] = [[float(price), float(size)] for price, size in bids]
 
             except Exception as e:
-                print(f" BingX FUTURES parse error: {e}")
+                logger.error(f"BingX FUTURES parse error: {e}", exc_info=True)
 
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot_0")
