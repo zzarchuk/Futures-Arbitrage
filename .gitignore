@@ -15,7 +15,9 @@ __pycache__/
 # logs
 *.log
 
-# IDE
-.vscode/
-.idea/
 
+tests/
+
+
+
+идея_сайта.idea
