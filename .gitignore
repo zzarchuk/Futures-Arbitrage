@@ -1,9 +1,9 @@
-# virtual env
+# env
+.env
+
+# venv
 .venv/
 venv/
-
-# environment variables
-.env
 
 # cache
 __pycache__/
@@ -15,9 +15,11 @@ __pycache__/
 # logs
 *.log
 
-
+# tests
 tests/
 
+# IDE
+.idea/
+.vscode/
 
-
-идея_сайта.idea
+tasks.idea
