@@ -63,7 +63,7 @@ JWT_SECRET=tu_clave_secreta
 
 ## Instalación
 ```
-git clone https://github.com/usuario/proyecto.git
+git clone https://github.com/zzarchuk/Futures-Arbitrage.git
 
 cd run
 
