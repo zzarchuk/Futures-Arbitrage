@@ -1,0 +1,21 @@
+# virtual env
+.venv/
+venv/
+
+# environment variables
+.env
+
+# cache
+__pycache__/
+*.pyc
+
+# database
+*.db
+
+# logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+

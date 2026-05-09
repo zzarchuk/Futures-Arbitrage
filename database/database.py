@@ -4,10 +4,16 @@ from fastapi import Depends
 from typing import Annotated
 from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy import JSON, ForeignKey, select
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+db = os.getenv("DATABASE_URL")
 
 
 
-engine = create_async_engine('sqlite+aiosqlite:///data.db')
+engine = create_async_engine(db) # type: ignore
 
 new_session = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -90,6 +96,22 @@ class Candles(Base):
     high: Mapped[float]
     volume: Mapped[int]
     
+    def __repr__(self):
+        return (
+            f"{self.token} ("
+            f"exchange_short='{self.exchange_short}', "
+            f"type_short='{self.type_short}', "
+            f"exchange_long='{self.exchange_long}', "
+            f"type_long='{self.type_long}', "
+            f"token='{self.token}', "
+            f"time={self.time}, "
+            f"open_spread={self.open_spread}, "
+            f"close={self.close}, "
+            f"low={self.low}, "
+            f"high={self.high}, "
+            f"volume={self.volume}"
+            f")"
+        )
     
     #user_candles: Mapped['Users'] = relationship(back_populates='candles')
 

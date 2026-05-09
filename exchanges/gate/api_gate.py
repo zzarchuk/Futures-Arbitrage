@@ -59,6 +59,7 @@ async def gateio_futures(data, session):
                             price=цена,
                             futures=True,
                         )
+                        
                 except Exception as e:
                     logger.error(f"Gate API futures: {e}", exc_info=True)
                     continue
@@ -90,3 +91,4 @@ async def gateio_futures(data, session):
         except Exception as e:
             logger.error(f"Gate API futures: {e}", exc_info=True)
             await asyncio.sleep(0.5)
+            
