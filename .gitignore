@@ -20,6 +20,6 @@ tests/
 
 # IDE
 .idea/
-.vscode/
+
 
 tasks.idea
