@@ -1,17 +1,124 @@
 const params = new URLSearchParams(window.location.search);
 
-const symbol = params.get("symbol");
-const volume = params.get("volume");
-const type_long = params.get("type_long");
-const type_short = params.get("type_short");
-const exchange_long = params.get("exchange_long");
-const exchange_short = params.get("exchange_short");
+const symbol = params.get("symbol") ?? null;
+const volume = params.get("volume") ?? null;
+const type_long = params.get("type_long") ?? null;
+const type_short = params.get("type_short") ?? null;
+const exchange_long = params.get("exchange_long") ?? null;
+const exchange_short = params.get("exchange_short") ?? null;
 
-const longEx = exchange_long.toUpperCase();
-const shortEx = exchange_short.toUpperCase();
-const longType = type_long.toUpperCase();
-const shortType = type_short.toUpperCase();
-console.log(symbol)
+const longEx = (exchange_long ?? "").toUpperCase();
+const shortEx = (exchange_short ?? "").toUpperCase();
+const longType = (type_long ?? "").toUpperCase();
+const shortType = (type_short ?? "").toUpperCase();
+
+
+const btn = document.getElementById("dropdown-btn");
+const menu = document.getElementById("dropdown-menu");
+const btn_next = document.getElementById("btn_next");
+
+let loaded = false;
+
+let currentCharts = {};
+let currentKeys = [];
+let currentIndex = 0;
+
+
+btn_next.onclick = () => {
+
+    if (currentKeys.length === 0) return;
+
+    currentIndex++;
+
+    if (currentIndex >= currentKeys.length) {
+        currentIndex = 0;
+    }
+
+    const key = currentKeys[currentIndex];
+
+    loadChart(key);
+};
+
+
+btn.onclick = () => {
+    menu.classList.toggle("hidden");
+
+    if (!menu.dataset.loaded) {
+        loadTokens();
+        menu.dataset.loaded = "true";
+    }
+};
+
+async function loadTokens() {
+    const res = await fetch("/api/v1/graphs");
+    const tokens = await res.json();
+
+    console.log(tokens);
+
+    menu.innerHTML = "";
+
+    tokens.forEach(token => {
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerText = token;
+
+        div.onclick = async () => {
+
+            btn.innerText = token + " ▼";
+            menu.classList.add("hidden");
+
+            const res = await fetch(`/api/v1/one_chart?symbol=${token}`);
+            const data = await res.json();
+
+            console.log(data);
+
+            // ===== state =====
+            currentCharts = data;
+            currentKeys = Object.keys(data);
+            currentIndex = 0;
+
+            // ===== первый график =====
+            const firstKey = currentKeys[0];
+            loadChart(firstKey);
+        };
+
+        menu.appendChild(div);
+    });
+}
+
+
+function loadChart(key) {
+    const candles = currentCharts[key];
+
+    const first = candles[0];
+
+    document.getElementById("header").innerText =
+        `📈 ${first.token} | ${first.exchange_long} (${first.type_long}) → ${first.exchange_short} (${first.type_short}) | volume: ${first.volume} USDT`;
+
+    loadCandles(candles);
+}
+
+async function loadCandles(data) {
+    try {
+
+        const formatted = data.map(c => ({
+            time: Number(c.time),
+            open: Number(c.open_spread),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+        }));
+
+        candleSeries.setData(formatted);
+
+        chart.timeScale().fitContent();
+
+    } catch (err) {
+        console.error("Ошибка:", err);
+    }
+}
+
+
 // 🧠 header
 document.getElementById("header").innerText =
     `📈 ${symbol} | ${longEx} (${longType}) → ${shortEx} (${shortType}) | volume: ${volume} USDT`;
@@ -60,7 +167,7 @@ const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
 
 
 // 📡 загрузка данных
-async function loadCandles() {
+async function loadCandlesQuery() {
     try {
         const paramsFetch = new URLSearchParams({
             symbol,
@@ -102,21 +209,34 @@ async function loadCandles() {
 
 
 // 🚀 запуск
-loadCandles();
+loadCandlesQuery();
 
 
 // 🎯 tooltip
 const tooltip = document.getElementById("tooltip");
 
+
 chart.subscribeCrosshairMove(param => {
-    if (!param.time || !param.seriesPrices.get(candleSeries)) {
+
+    if (
+        !param ||
+        !param.point ||
+        !param.time ||
+        !param.seriesPrices
+    ) {
         tooltip.style.display = "none";
         return;
     }
 
     const price = param.seriesPrices.get(candleSeries);
 
+    if (!price) {
+        tooltip.style.display = "none";
+        return;
+    }
+
     tooltip.style.display = "block";
+
     tooltip.style.left = param.point.x + 15 + "px";
     tooltip.style.top = param.point.y + 15 + "px";
 
@@ -126,13 +246,4 @@ chart.subscribeCrosshairMove(param => {
         L: ${price.low}<br>
         C: ${price.close}
     `;
-});
-
-
-// 📐 адаптив
-window.addEventListener('resize', () => {
-    chart.applyOptions({
-        width: window.innerWidth,
-        height: window.innerHeight - 50,
-    });
 });

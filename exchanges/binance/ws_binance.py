@@ -59,7 +59,9 @@ class BinanceDynamicWS(BaseDynamicWSClient):
 
             except Exception as e:
                 logger.error(f"Binance spot WS reconect: {e}", exc_info=True)
+                
                 await asyncio.sleep(5)
+                raise
 
     async def _handle_futures_connection(self):
 
@@ -113,6 +115,7 @@ class BinanceDynamicWS(BaseDynamicWSClient):
             except Exception as e:
                 logger.error(f"Binance futures WS reconect: {e}", exc_info=True)
                 await asyncio.sleep(5)
+                raise
 
     async def run_spot(self):
         await self._reconnect_wrapper(self._handle_spot_connection, "spot")

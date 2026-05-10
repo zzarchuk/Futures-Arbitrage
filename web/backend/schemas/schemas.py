@@ -85,4 +85,7 @@ class CandlesSchema(BaseModel):
     def lower_all(cls, data):
         return data.lower()    
     
+    
+class ChartSchema(BaseModel):
+    symbol: str
 #ge = больше или равно le = меньше или равно

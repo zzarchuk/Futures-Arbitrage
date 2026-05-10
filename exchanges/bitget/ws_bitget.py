@@ -67,7 +67,7 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                                 }
                                 await self.ws_futures.send(json.dumps(unsub))# type: ignore
                             
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.1)
                             
                         except Exception as e:
                             logger.error(f'Bitger WS unsub error: {e}', exc_info=True)
@@ -118,9 +118,10 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                             }
                             await ws.send(json.dumps(sub))
                             current_subscribed.add(symbol)
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.1)
                         except Exception as e:
                             logger.error(f'Bitget WS sub error: {symbol} {e}', exc_info=True)
+                            raise
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -219,9 +220,10 @@ class BitgetDynamicWS(BaseDynamicWSClient):
                             }
                             await ws.send(json.dumps(sub))
                             current_subscribed.add(symbol)
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.1)
                         except Exception as e:
                             logger.error(f"Bitget WS subscribe error {symbol}: {e}", exc_info=True)
+                            raise
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:

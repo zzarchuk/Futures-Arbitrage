@@ -61,6 +61,7 @@ class BybitDynamicWS(BaseDynamicWSClient):
                                 await asyncio.sleep(0.1)
                             except Exception as e:
                                 logger.error(f"Bybit {self.market} subscribe error: {e}", exc_info=True)
+                                raise
 
                     if to_unsubscribe:
                         unsubscribe_list = list(to_unsubscribe)
@@ -91,6 +92,7 @@ class BybitDynamicWS(BaseDynamicWSClient):
                                 await asyncio.sleep(0.1)
                             except Exception as e:
                                 logger.error(f" Bybit {self.market} unsubscribe error: {e}", exc_info=True)
+                                raise
 
                     try:
                         await asyncio.wait_for(

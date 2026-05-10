@@ -92,9 +92,10 @@ class HtxDynamicWS(BaseDynamicWSClient):
                             }
                             await ws.send(json.dumps(sub))
                             current_subscribed.add(symbol)
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.1)
                         except Exception as e:
                             logger.error(f"Htx WS FUTURES subscribe error {symbol}: {e}", exc_info=True)
+                            raise
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:
@@ -190,6 +191,7 @@ class HtxDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.2)
                         except Exception as e:
                             logger.error(f"Htx WS spot subscribe error {symbol}: {e}", exc_info=True)
+                            raise
 
                     # Отписываемся
                     # for symbol in to_unsubscribe:

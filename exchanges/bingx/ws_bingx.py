@@ -54,7 +54,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                                 }
                                 await self.ws_futures.send(json.dumps(unsub))# type: ignore
                             
-                            await asyncio.sleep(0.05)  # Небольшая задержка между unsub
+                            await asyncio.sleep(0.1)  # Небольшая задержка между unsub
                             
                         except Exception as e:
                             logger.error(f" Batch bingx unsubscribe error {symbol}: {e}", exc_info=True)
@@ -103,6 +103,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.1)
                         except Exception as e:
                             logger.error(f'Bingx spot error: {e}', exc_info=True)
+                            raise
 
                     for symbol in to_unsubscribe:
                         current_subscribed.remove(symbol)
@@ -179,6 +180,7 @@ class BingxDynamicWS(BaseDynamicWSClient):
                             await asyncio.sleep(0.1)
                         except Exception as e:
                             logger.error(f'Bingx WS subscibe error: {e}', exc_info=True)
+                            raise
 
                     for symbol in to_unsubscribe:
                         current_subscribed.remove(symbol)

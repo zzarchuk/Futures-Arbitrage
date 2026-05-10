@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from contextlib import asynccontextmanager
 from config.config import state_websocket
-from main import стакан
 import asyncio
+from main import стакан
 from database.database import run_database
 from utils.common.jwt_help import get_user_for_ws
 from web.backend.routes.filters_route import filter_router
