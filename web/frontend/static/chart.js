@@ -25,7 +25,6 @@ let currentIndex = 0;
 
 
 btn_next.onclick = () => {
-
     if (currentKeys.length === 0) return;
 
     currentIndex++;
@@ -35,13 +34,13 @@ btn_next.onclick = () => {
     }
 
     const key = currentKeys[currentIndex];
-
     loadChart(key);
 };
 
 
 btn.onclick = () => {
     menu.classList.toggle("hidden");
+    console.log(1232)
 
     if (!menu.dataset.loaded) {
         loadTokens();
@@ -63,7 +62,6 @@ async function loadTokens() {
         div.innerText = token;
 
         div.onclick = async () => {
-
             btn.innerText = token + " ▼";
             menu.classList.add("hidden");
 
@@ -72,12 +70,10 @@ async function loadTokens() {
 
             console.log(data);
 
-            // ===== state =====
             currentCharts = data;
             currentKeys = Object.keys(data);
             currentIndex = 0;
 
-            // ===== первый график =====
             const firstKey = currentKeys[0];
             loadChart(firstKey);
         };
@@ -100,7 +96,6 @@ function loadChart(key) {
 
 async function loadCandles(data) {
     try {
-
         const formatted = data.map(c => ({
             time: Number(c.time),
             open: Number(c.open_spread),
@@ -218,17 +213,21 @@ const tooltip = document.getElementById("tooltip");
 
 chart.subscribeCrosshairMove(param => {
 
+    // ✅ ИСПРАВЛЕНО: убрана проверка !param.seriesPrices — этого свойства
+    // больше не существует в lightweight-charts v4+, из-за него крашился
+    // весь JS и переставали работать все кнопки на странице
     if (
         !param ||
         !param.point ||
-        !param.time ||
-        !param.seriesPrices
+        !param.time
     ) {
         tooltip.style.display = "none";
         return;
     }
 
-    const price = param.seriesPrices.get(candleSeries);
+    // ✅ ИСПРАВЛЕНО: param.seriesPrices.get() → param.seriesData.get()
+    // В v4+ данные серии хранятся в seriesData, а не в seriesPrices
+    const price = param.seriesData.get(candleSeries);
 
     if (!price) {
         tooltip.style.display = "none";
