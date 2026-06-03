@@ -1,5 +1,7 @@
-const ws = new WebSocket(`ws://127.0.0.1:8000/ws`);
+const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+const ws = new WebSocket(`${protocol}//${location.host}/ws`);
 const messages = new Map();
+
 const table = document.querySelector(".signals-table");
 console.log(table)
 

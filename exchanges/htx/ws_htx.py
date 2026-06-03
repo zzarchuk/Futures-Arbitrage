@@ -65,7 +65,7 @@ class HtxDynamicWS(BaseDynamicWSClient):
     
     async def _handle_futures_connection(self):
 
-        url = f"wss://api.hbdm.vn/linear-swap-ws"
+        url = f"wss://api.hbdm.com/linear-swap-ws"
 
         current_subscribed = set()
 

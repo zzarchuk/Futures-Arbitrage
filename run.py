@@ -66,6 +66,7 @@ async def socket_page(request: Request):
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket, user_id: int = Depends(get_user_for_ws)):
     await ws.accept()
+    print(user_id)
     async with state_websocket.lock_websocket:
         state_websocket.websocket_clients[user_id] = ws
     try:
@@ -79,4 +80,4 @@ async def websocket_endpoint(ws: WebSocket, user_id: int = Depends(get_user_for_
 
 
 if __name__ == "__main__":
-    uvicorn.run("run:app", reload=True)
+    uvicorn.run("run:app", host = '0.0.0.0', port = 8000, reload=True)

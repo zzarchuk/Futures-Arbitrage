@@ -96,19 +96,75 @@ function loadChart(key) {
 
 async function loadCandles(data) {
     try {
+
         const formatted = data.map(c => ({
             time: Number(c.time),
+
+            // если backend отдает open_spread
             open: Number(c.open_spread),
+
             high: Number(c.high),
             low: Number(c.low),
             close: Number(c.close),
         }));
 
+
+        // ✅ ОБЯЗАТЕЛЬНО:
+        // strict ascending order for lightweight-charts
+        formatted.sort((a, b) => a.time - b.time);
+// ✅ фикс: дорисовываем "плоские" свечи где open=close=high=low
+        formatted.forEach(c => {
+            const isFlat = c.open === c.close && c.high === c.low && c.open === c.high;
+            if (isFlat) {
+                c.high = c.open + 0.01;
+                c.low  = c.open - 0.01;
+            }
+        });
+
+
+        // ✅ диагностика
+        console.log("candles:", formatted.length);
+
+        const unique = new Set(formatted.map(x => x.time));
+
+        console.log("unique time:", unique.size);
+
+
+        for (let i = 1; i < formatted.length; i++) {
+
+            if (formatted[i].time <= formatted[i - 1].time) {
+
+                console.log(
+                    "BAD ORDER",
+                    i,
+                    formatted[i - 1],
+                    formatted[i]
+                );
+            }
+        }
+
+
+        console.log(formatted);
+
+
         candleSeries.setData(formatted);
 
+
+        // ✅ нормальный spacing
+        chart.timeScale().applyOptions({
+            rightOffset: 5,
+            barSpacing: 12,
+            minBarSpacing: 8,
+            timeVisible: true,
+            secondsVisible: true,
+        });
+
+
+        // ✅ fit after spacing
         chart.timeScale().fitContent();
 
     } catch (err) {
+
         console.error("Ошибка:", err);
     }
 }
@@ -145,7 +201,7 @@ const chart = LightweightCharts.createChart(document.getElementById('chart'), {
     timeScale: {
         borderColor: '#333',
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible: true,
     },
 });
 
@@ -163,7 +219,9 @@ const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
 
 // 📡 загрузка данных
 async function loadCandlesQuery() {
+
     try {
+
         const paramsFetch = new URLSearchParams({
             symbol,
             exchange_long,
@@ -172,7 +230,9 @@ async function loadCandlesQuery() {
             type_short,
             volume
         });
+
         const res = await fetch(`/api/v1/candles?${paramsFetch.toString()}`);
+
         if (!res.ok) {
             console.error("Ошибка API");
             return;
@@ -187,21 +247,47 @@ async function loadCandlesQuery() {
 
         const formatted = data.map(c => ({
             time: Number(c.time),
-            open: Number(c.open),
+
+            // ⚠️ тут был open
+            // а у тебя backend местами отдает open_spread
+            open: Number(c.open ?? c.open_spread),
+
             high: Number(c.high),
             low: Number(c.low),
             close: Number(c.close),
         }));
 
+
+        // ✅ sorting
+        formatted.sort((a, b) => a.time - b.time);
+// ✅ фикс: дорисовываем "плоские" свечи где open=close=high=low
+        formatted.forEach(c => {
+            const isFlat = c.open === c.close && c.high === c.low && c.open === c.high;
+            if (isFlat) {
+                c.high = c.open + 0.01;
+                c.low  = c.open - 0.01;
+            }
+        });
+
+        console.log("candles:", formatted.length);
+
+
         candleSeries.setData(formatted);
+
+
+        chart.timeScale().applyOptions({
+            rightOffset: 5,
+            barSpacing: 12,
+            minBarSpacing: 8,
+        });
 
         chart.timeScale().fitContent();
 
     } catch (err) {
+
         console.error("Ошибка:", err);
     }
 }
-
 
 // 🚀 запуск
 loadCandlesQuery();

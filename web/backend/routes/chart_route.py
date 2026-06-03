@@ -86,5 +86,7 @@ async def chart_token(session: SessionDep, data: ChartSchema = Depends()):
     for i in result:
         key = f'{i.token}_{i.exchange_long}_{i.type_long}_{i.exchange_short}_{i.type_short}_{i.volume}'
         valid[key].append(i)
-    
+
+
+
     return valid

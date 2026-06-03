@@ -33,6 +33,7 @@ async def get_user_for_ws(ws: WebSocket, session: SessionDep):
     
     token = ws.cookies.get(config.JWT_ACCESS_COOKIE_NAME)
     if not token:
+        
         raise HTTPException(status_code=401, detail='You are not logined or registered')
     try:
         data = jwt.decode(jwt=token, algorithms=['HS256'], key=config.JWT_SECRET_KEY) # type: ignore
